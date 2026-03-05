@@ -41,30 +41,30 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y nsis rsync
           npm install -g pkg
+          pip install pip --upgrade
 
       - name: Cache runtimes
         uses: actions/cache@v4
         with:
           path: target/cache
-          key: runtimes-jre${{ env.JRE_VERSION }}-mongo${{ env.MONGODB_VERSION }}-node${{ env.NODE_VERSION }}-nats${{ env.NATS_VERSION }}-nginx${{ env.NGINX_VERSION }}
+          key: runtimes-jre24-mongo8.0.4-node20.18.1-nats2.10.22-nginx1.26.2
           restore-keys: runtimes-
-        env:
-          JRE_VERSION: "24+36"
-          MONGODB_VERSION: "8.0.4"
-          NODE_VERSION: "20.18.1"
-          NATS_VERSION: "2.10.22"
-          NGINX_VERSION: "1.26.2"
 
-      - name: Cache Maven repos
+      - name: Cache Maven
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: maven-${{ hashFiles('target/repos/**/pom.xml') }}
+          key: maven-${{ hashFiles('**/pom.xml') }}
           restore-keys: maven-
 
       - name: Build installer
@@ -72,7 +72,17 @@ jobs:
           chmod +x build-installer.sh
           ./build-installer.sh ${{ steps.version.outputs.VERSION }}
         env:
+          # Used by build script for GitHub API calls (auto-detect latest tags)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read manifest
+        id: manifest
+        run: |
+          if [ -f target/bundle/manifest.json ]; then
+            echo "MANIFEST<<EOF" >> $GITHUB_OUTPUT
+            cat target/bundle/manifest.json >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -80,22 +90,36 @@ jobs:
           name: OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}
           path: target/OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe
 
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest
+          path: target/bundle/manifest.json
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: "OneShell POS v${{ steps.version.outputs.VERSION }}"
-          files: target/OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe
+          files: |
+            target/OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe
+            target/bundle/manifest.json
           body: |
             ## OneShell POS v${{ steps.version.outputs.VERSION }}
 
             ### Bundled Runtimes
-            - Java JRE 24
-            - Node.js 20.18.1
-            - Python 3.11.9
-            - MongoDB 8.0.4
-            - NATS 2.10.22
-            - Nginx 1.26.2
+            | Runtime | Version |
+            |---------|---------|
+            | Java JRE | 24 |
+            | Node.js | 20.18.1 |
+            | Python | 3.11.9 |
+            | MongoDB | 8.0.4 |
+            | NATS | 2.10.22 |
+            | Nginx | 1.26.2 |
+
+            ### Application Versions
+            Versions auto-detected from latest release tags of each repo.
+            See `manifest.json` for exact tags used in this build.
 
             ### Install
             1. Download `OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe`

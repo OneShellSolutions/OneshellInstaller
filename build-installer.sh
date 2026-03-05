@@ -44,20 +44,76 @@ NATS_VERSION="2.10.22"
 NGINX_VERSION="1.26.2"
 
 # ============================================
-# Application repo tags (from components.conf or defaults)
-# Format in components.conf: REPO_NAME=tag_or_branch
+# Application repos and their versions
+#
+# Resolution order for each repo:
+#   1. components.conf override (if set, not empty)
+#   2. Latest GitHub release tag (via API)
+#   3. Fallback to "master"
 # ============================================
-ONESHELL_COMMONS_TAG="master"
-POS_CLIENT_BACKEND_TAG="master"
-POS_NODE_BACKEND_TAG="master"
-POS_FRONTEND_TAG="master"
-POS_PYTHON_BACKEND_TAG="master"
+APP_REPOS="oneshell-commons PosClientBackend PosNodeBackend PosFrontend PosPythonBackend"
+
+# Helper: get latest release tag from GitHub for a repo
+# Uses GITHUB_TOKEN if available (avoids API rate limits in CI)
+get_latest_tag() {
+    local repo="$1"
+    local auth_header=""
+    [ -n "${GITHUB_TOKEN:-}" ] && auth_header="-H Authorization: token ${GITHUB_TOKEN}"
+    local tag
+    # Try latest release first
+    tag=$(curl -fsSL $auth_header "https://api.github.com/repos/${GITHUB_ORG}/${repo}/releases/latest" 2>/dev/null \
+        | grep '"tag_name"' | head -1 | sed 's/.*"tag_name".*"\(.*\)".*/\1/')
+    if [ -z "$tag" ]; then
+        # No releases - try latest tag
+        tag=$(curl -fsSL $auth_header "https://api.github.com/repos/${GITHUB_ORG}/${repo}/tags?per_page=1" 2>/dev/null \
+            | grep '"name"' | head -1 | sed 's/.*"name".*"\(.*\)".*/\1/')
+    fi
+    echo "${tag:-master}"
+}
+
+# Initialize defaults to empty (will auto-detect)
+ONESHELL_COMMONS_TAG=""
+POS_CLIENT_BACKEND_TAG=""
+POS_NODE_BACKEND_TAG=""
+POS_FRONTEND_TAG=""
+POS_PYTHON_BACKEND_TAG=""
 
 # Load overrides from components.conf if it exists
 if [ -f "$SCRIPT_DIR/components.conf" ]; then
-    echo "Loading component tags from components.conf..."
+    echo "Loading overrides from components.conf..."
     source "$SCRIPT_DIR/components.conf"
 fi
+
+# Auto-detect versions for anything not pinned in components.conf
+echo ""
+echo "Resolving component versions..."
+declare -A REPO_TAG_MAP
+for repo in $APP_REPOS; do
+    # Convert repo name to config var name
+    case "$repo" in
+        oneshell-commons)   var_val="$ONESHELL_COMMONS_TAG" ;;
+        PosClientBackend)   var_val="$POS_CLIENT_BACKEND_TAG" ;;
+        PosNodeBackend)     var_val="$POS_NODE_BACKEND_TAG" ;;
+        PosFrontend)        var_val="$POS_FRONTEND_TAG" ;;
+        PosPythonBackend)   var_val="$POS_PYTHON_BACKEND_TAG" ;;
+    esac
+
+    if [ -n "$var_val" ]; then
+        REPO_TAG_MAP[$repo]="$var_val"
+        echo "  $repo = ${var_val} (pinned)"
+    else
+        resolved=$(get_latest_tag "$repo")
+        REPO_TAG_MAP[$repo]="$resolved"
+        echo "  $repo = ${resolved} (auto: latest release)"
+    fi
+done
+
+# Set variables from resolved map
+ONESHELL_COMMONS_TAG="${REPO_TAG_MAP[oneshell-commons]}"
+POS_CLIENT_BACKEND_TAG="${REPO_TAG_MAP[PosClientBackend]}"
+POS_NODE_BACKEND_TAG="${REPO_TAG_MAP[PosNodeBackend]}"
+POS_FRONTEND_TAG="${REPO_TAG_MAP[PosFrontend]}"
+POS_PYTHON_BACKEND_TAG="${REPO_TAG_MAP[PosPythonBackend]}"
 
 # Download URLs
 WINSW_URL="https://github.com/winsw/winsw/releases/download/v${WINSW_VERSION}/WinSW-x64.exe"
