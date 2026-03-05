@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 :: ============================================
 :: OneShell POS Auto-Updater
-:: Runs via Windows Task Scheduler (hourly)
+:: Runs via Windows Task Scheduler (every 6 hours)
 :: Checks GitHub for new releases and silently
 :: installs the latest version.
 :: ============================================
@@ -28,9 +28,24 @@ if exist "%VERSION_FILE%" (
 )
 call :log "Current version: %LOCAL_VERSION%"
 
+:: Skip if last check was less than 5 hours ago (prevents rapid retries)
+set LAST_CHECK_FILE=%~dp0last-check.txt
+if exist "%LAST_CHECK_FILE%" (
+    for /f "tokens=*" %%t in (%LAST_CHECK_FILE%) do set LAST_CHECK=%%t
+    :: PowerShell time diff check - skip if < 5 hours
+    for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { $last = [datetime]::Parse('%LAST_CHECK%'); if (([datetime]::Now - $last).TotalHours -lt 5) { 'SKIP' } else { 'OK' } } catch { 'OK' }"') do set CHECK_RESULT=%%r
+    if "!CHECK_RESULT!"=="SKIP" (
+        call :log "Skipping: last check was less than 5 hours ago."
+        goto :done
+    )
+)
+
 :: Query GitHub API for latest release
 call :log "Checking GitHub for latest release..."
 for /f "tokens=*" %%i in ('powershell -NoProfile -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-RestMethod -Uri 'https://api.github.com/repos/%GITHUB_REPO%/releases/latest' -TimeoutSec 15; Write-Output $r.tag_name } catch { Write-Output 'ERROR' }"') do set LATEST_TAG=%%i
+
+:: Save check timestamp (even on error, to avoid hammering GitHub on rate limit)
+powershell -NoProfile -Command "[datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss')" > "%LAST_CHECK_FILE%"
 
 if "%LATEST_TAG%"=="ERROR" (
     call :log "ERROR: Could not reach GitHub API. Aborting."
@@ -70,7 +85,13 @@ if not "%DL_RESULT%"=="OK" (
     goto :done
 )
 
-call :log "Download complete. Running silent installer..."
+call :log "Download complete. Killing tray app before update..."
+
+:: Kill tray app first (prevents file locking)
+taskkill /F /IM OneShellTray.exe >nul 2>&1
+timeout /t 3 /nobreak >nul
+
+call :log "Running silent installer..."
 
 :: Run the installer silently (/S = NSIS silent flag)
 :: The installer will stop services, replace files, restart services

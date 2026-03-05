@@ -40,6 +40,17 @@ Section "Install"
     nsExec::ExecToLog 'net stop OneShellPosBackend'
     nsExec::ExecToLog 'net stop OneShellNATS'
     nsExec::ExecToLog 'net stop OneShellMongoDB'
+    Sleep 3000
+
+    ; Kill any lingering processes (prevents file locking during upgrade)
+    nsExec::ExecToLog 'taskkill /F /IM OneShellMonitor.exe'
+    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
+    nsExec::ExecToLog 'taskkill /F /IM nginx.exe'
+    nsExec::ExecToLog 'taskkill /F /IM nats-server.exe'
+    nsExec::ExecToLog 'taskkill /F /IM mongod.exe'
+    nsExec::ExecToLog 'taskkill /F /IM node.exe'
+    nsExec::ExecToLog 'wmic process where "commandline like $\'%posbackend%$\'" call terminate'
+    Sleep 2000
 
     ; Uninstall old services
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" uninstall'
@@ -215,9 +226,9 @@ Section "Install"
     DetailPrint "Starting Monitor..."
     nsExec::ExecToLog 'net start OneShellMonitor'
 
-    ; ======= Auto-update scheduled task =======
+    ; ======= Auto-update scheduled task (every 6 hours) =======
     DetailPrint "Creating auto-update task..."
-    nsExec::ExecToLog 'schtasks /Create /SC HOURLY /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
+    nsExec::ExecToLog 'schtasks /Create /SC HOURLY /MO 6 /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
 
     ; ======= Firewall rules =======
     DetailPrint "Configuring firewall..."
