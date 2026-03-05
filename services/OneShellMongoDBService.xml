@@ -1,0 +1,20 @@
+<service>
+  <id>OneShellMongoDB</id>
+  <name>OneShell MongoDB</name>
+  <description>OneShell POS - MongoDB Database Server</description>
+  <executable>%BASE%\..\mongodb\bin\mongod.exe</executable>
+  <arguments>--dbpath "%BASE%\..\data\mongodb" --port 27017 --bind_ip 127.0.0.1</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  <logpath>%BASE%\..\logs\mongodb</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyy-MM-dd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+  </log>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+</service>

@@ -1,0 +1,5 @@
+target/
+node_modules/
+dist/
+*.exe
+.DS_Store

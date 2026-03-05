@@ -1,0 +1,21 @@
+<service>
+  <id>OneShellNATS</id>
+  <name>OneShell NATS</name>
+  <description>OneShell POS - NATS Message Server with JetStream</description>
+  <executable>%BASE%\..\nats\nats-server.exe</executable>
+  <arguments>--config "%BASE%\..\config\nats-server.conf"</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  <logpath>%BASE%\..\logs\nats</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyy-MM-dd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+  </log>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <depend>OneShellMongoDB</depend>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+</service>

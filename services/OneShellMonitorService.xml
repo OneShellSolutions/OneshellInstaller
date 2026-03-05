@@ -1,0 +1,20 @@
+<service>
+  <id>OneShellMonitor</id>
+  <name>OneShell Monitor</name>
+  <description>OneShell POS - Monitoring Dashboard and Service Manager</description>
+  <executable>%BASE%\..\monitor\OneShellMonitor.exe</executable>
+  <workingdirectory>%BASE%\..\monitor</workingdirectory>
+  <env name="ONESHELL_SERVICE_MODE" value="true"/>
+  <logpath>%BASE%\..\logs\monitor</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyy-MM-dd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+  </log>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+</service>

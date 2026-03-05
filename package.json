@@ -1,0 +1,19 @@
+{
+  "name": "oneshell-installer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "package": "pkg -t node18-win-x64 -o dist/OneShellMonitor.exe .",
+    "build": "bash build-installer.sh"
+  },
+  "dependencies": {
+    "express": "^4.21.1"
+  },
+  "pkg": {
+    "scripts": ["./index.js"],
+    "assets": ["public/**/*"],
+    "targets": ["node18-win-x64"]
+  }
+}

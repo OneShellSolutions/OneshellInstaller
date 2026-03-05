@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OneShell POS Monitor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+    <header class="header">
+        <div class="header-left">
+            <img src="logo.png" alt="OneShell" class="logo" onerror="this.style.display='none'">
+            <h1>OneShell POS</h1>
+        </div>
+        <div class="header-right">
+            <span id="overall-status" class="badge badge-loading">Checking...</span>
+            <span id="installer-version" class="version-badge"></span>
+        </div>
+    </header>
+
+    <nav class="nav">
+        <button class="nav-btn active" data-page="dashboard" onclick="showPage('dashboard')">Dashboard</button>
+        <button class="nav-btn" data-page="services" onclick="showPage('services')">Services</button>
+        <button class="nav-btn" data-page="system" onclick="showPage('system')">System</button>
+        <button class="nav-btn" data-page="updates" onclick="showPage('updates')">Updates</button>
+        <button class="nav-btn" data-page="logs" onclick="showPage('logs')">Logs</button>
+    </nav>
+
+    <!-- Dashboard Page -->
+    <div id="page-dashboard" class="page active">
+        <div class="grid" id="service-cards"></div>
+
+        <div class="actions-bar">
+            <button class="btn btn-primary" onclick="restartAll()">Restart All Services</button>
+            <button class="btn btn-secondary" onclick="checkUpdates()">Check for Updates</button>
+            <a href="http://localhost" target="_blank" class="btn btn-success">Open POS</a>
+        </div>
+    </div>
+
+    <!-- Services Page -->
+    <div id="page-services" class="page">
+        <div class="service-list" id="service-detail-list"></div>
+        <div class="service-detail" id="service-detail-panel">
+            <p class="placeholder-text">Select a service to view details</p>
+        </div>
+    </div>
+
+    <!-- System Page -->
+    <div id="page-system" class="page">
+        <div class="system-info" id="system-info"></div>
+    </div>
+
+    <!-- Updates Page -->
+    <div id="page-updates" class="page">
+        <div class="card">
+            <h3>Component Versions</h3>
+            <div id="component-versions"></div>
+        </div>
+        <div class="card">
+            <h3>Update Actions</h3>
+            <button class="btn btn-primary" onclick="checkUpdates()">Check for Updates Now</button>
+            <div id="update-status" class="status-text" style="margin-top:12px;"></div>
+        </div>
+        <div class="card">
+            <h3>Update Log</h3>
+            <pre id="update-log" class="log-view"></pre>
+        </div>
+    </div>
+
+    <!-- Logs Page -->
+    <div id="page-logs" class="page">
+        <div class="log-controls">
+            <select id="log-service-select" onchange="loadServiceLogs()">
+                <option value="">Select a service...</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadServiceLogs()">Refresh</button>
+        </div>
+        <pre id="service-log-view" class="log-view"></pre>
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
