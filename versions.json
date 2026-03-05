@@ -1,0 +1,21 @@
+{
+  "installer": "1.0.0",
+
+  "runtimes": {
+    "jre": "24+36",
+    "node": "20.18.1",
+    "python": "3.11.9",
+    "mongodb": "8.0.4",
+    "nats": "2.10.22",
+    "nginx": "1.26.2",
+    "winsw": "3.0.0-alpha.11"
+  },
+
+  "applications": {
+    "oneshell-commons": "",
+    "PosClientBackend": "",
+    "PosNodeBackend": "",
+    "PosFrontend": "",
+    "PosPythonBackend": ""
+  }
+}

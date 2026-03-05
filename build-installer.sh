@@ -18,7 +18,8 @@ set -euo pipefail
 # Usage:
 #   ./build-installer.sh [VERSION]
 #
-# The script reads component tags from components.conf
+# All versions are read from versions.json (single source of truth)
+# App tags can be overridden by environment variables (CI workflow inputs)
 # ============================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -26,30 +27,43 @@ BUNDLE_DIR="$SCRIPT_DIR/target/bundle"
 CACHE_DIR="$SCRIPT_DIR/target/cache"
 REPOS_DIR="$SCRIPT_DIR/target/repos"
 
-# Version (from arg, or version.txt, or default)
-VERSION="${1:-$(cat "$SCRIPT_DIR/version.txt" 2>/dev/null || echo "1.0.0")}"
-
 # GitHub org
 GITHUB_ORG="OneShellSolutions"
 
 # ============================================
-# Runtime dependency versions
+# Read all versions from versions.json
 # ============================================
-WINSW_VERSION="3.0.0-alpha.11"
-JRE_VERSION="24+36"
-NODE_VERSION="20.18.1"
-PYTHON_VERSION="3.11.9"
-MONGODB_VERSION="8.0.4"
-NATS_VERSION="2.10.22"
-NGINX_VERSION="1.26.2"
+VERSIONS_FILE="$SCRIPT_DIR/versions.json"
+if [ ! -f "$VERSIONS_FILE" ]; then
+    echo "ERROR: versions.json not found at $VERSIONS_FILE"
+    exit 1
+fi
+
+# Helper to read JSON values (uses python since it's always available)
+json_val() {
+    python3 -c "import json,sys; d=json.load(open('$VERSIONS_FILE')); print(d$(printf '%s' "$1"))" 2>/dev/null
+}
+
+# Version (from arg, or versions.json, or default)
+VERSION="${1:-$(json_val "['installer']" || echo "1.0.0")}"
+
+# Runtime versions from versions.json
+WINSW_VERSION="$(json_val "['runtimes']['winsw']")"
+JRE_VERSION="$(json_val "['runtimes']['jre']")"
+NODE_VERSION="$(json_val "['runtimes']['node']")"
+PYTHON_VERSION="$(json_val "['runtimes']['python']")"
+MONGODB_VERSION="$(json_val "['runtimes']['mongodb']")"
+NATS_VERSION="$(json_val "['runtimes']['nats']")"
+NGINX_VERSION="$(json_val "['runtimes']['nginx']")"
 
 # ============================================
 # Application repos and their versions
 #
 # Resolution order for each repo:
-#   1. components.conf override (if set, not empty)
-#   2. Latest GitHub release tag (via API)
-#   3. Fallback to "master"
+#   1. Environment variables (set by CI workflow inputs)
+#   2. versions.json (if non-empty)
+#   3. Latest GitHub release tag (via API)
+#   4. Fallback to "master"
 # ============================================
 APP_REPOS="oneshell-commons PosClientBackend PosNodeBackend PosFrontend PosPythonBackend"
 
@@ -71,55 +85,36 @@ get_latest_tag() {
     echo "${tag:-master}"
 }
 
-# Tags can come from 3 sources (in priority order):
-#   1. Environment variables (set by CI workflow inputs)
-#   2. components.conf file (local overrides)
-#   3. Auto-detect from GitHub API (latest release tag)
-#
-# Empty = auto-detect
-
-# Start with env vars (already set by CI, or empty)
+# Start with env vars (set by CI, or empty)
 ONESHELL_COMMONS_TAG="${ONESHELL_COMMONS_TAG:-}"
 POS_CLIENT_BACKEND_TAG="${POS_CLIENT_BACKEND_TAG:-}"
 POS_NODE_BACKEND_TAG="${POS_NODE_BACKEND_TAG:-}"
 POS_FRONTEND_TAG="${POS_FRONTEND_TAG:-}"
 POS_PYTHON_BACKEND_TAG="${POS_PYTHON_BACKEND_TAG:-}"
 
-# Load from components.conf only if env var is empty
-if [ -f "$SCRIPT_DIR/components.conf" ]; then
-    echo "Loading overrides from components.conf..."
-    # Save current env values
-    _env_commons="$ONESHELL_COMMONS_TAG"
-    _env_client="$POS_CLIENT_BACKEND_TAG"
-    _env_node="$POS_NODE_BACKEND_TAG"
-    _env_frontend="$POS_FRONTEND_TAG"
-    _env_python="$POS_PYTHON_BACKEND_TAG"
-    source "$SCRIPT_DIR/components.conf"
-    # Env vars take priority over components.conf
-    [ -n "$_env_commons" ] && ONESHELL_COMMONS_TAG="$_env_commons"
-    [ -n "$_env_client" ] && POS_CLIENT_BACKEND_TAG="$_env_client"
-    [ -n "$_env_node" ] && POS_NODE_BACKEND_TAG="$_env_node"
-    [ -n "$_env_frontend" ] && POS_FRONTEND_TAG="$_env_frontend"
-    [ -n "$_env_python" ] && POS_PYTHON_BACKEND_TAG="$_env_python"
-fi
-
-# Auto-detect versions for anything not pinned in components.conf
+# Resolve tags: env var > versions.json > GitHub API auto-detect
 echo ""
 echo "Resolving component versions..."
 declare -A REPO_TAG_MAP
 for repo in $APP_REPOS; do
-    # Convert repo name to config var name
+    # Get env var value
     case "$repo" in
-        oneshell-commons)   var_val="$ONESHELL_COMMONS_TAG" ;;
-        PosClientBackend)   var_val="$POS_CLIENT_BACKEND_TAG" ;;
-        PosNodeBackend)     var_val="$POS_NODE_BACKEND_TAG" ;;
-        PosFrontend)        var_val="$POS_FRONTEND_TAG" ;;
-        PosPythonBackend)   var_val="$POS_PYTHON_BACKEND_TAG" ;;
+        oneshell-commons)   env_val="$ONESHELL_COMMONS_TAG" ;;
+        PosClientBackend)   env_val="$POS_CLIENT_BACKEND_TAG" ;;
+        PosNodeBackend)     env_val="$POS_NODE_BACKEND_TAG" ;;
+        PosFrontend)        env_val="$POS_FRONTEND_TAG" ;;
+        PosPythonBackend)   env_val="$POS_PYTHON_BACKEND_TAG" ;;
     esac
 
-    if [ -n "$var_val" ]; then
-        REPO_TAG_MAP[$repo]="$var_val"
-        echo "  $repo = ${var_val} (pinned)"
+    # Get versions.json value
+    json_tag="$(json_val "['applications']['$repo']")"
+
+    if [ -n "$env_val" ]; then
+        REPO_TAG_MAP[$repo]="$env_val"
+        echo "  $repo = ${env_val} (env override)"
+    elif [ -n "$json_tag" ]; then
+        REPO_TAG_MAP[$repo]="$json_tag"
+        echo "  $repo = ${json_tag} (versions.json)"
     else
         resolved=$(get_latest_tag "$repo")
         REPO_TAG_MAP[$repo]="$resolved"
