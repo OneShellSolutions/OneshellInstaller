@@ -21,7 +21,7 @@ ShowInstDetails show
 ; --- Modern UI ---
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "OneShell POS ${VERSION}"
-!define MUI_WELCOMEPAGE_TEXT "This will install OneShell POS on your computer.$\r$\n$\r$\nBundled components:$\r$\n  - Java Runtime (JRE 21)$\r$\n  - Node.js 20$\r$\n  - Python 3.11$\r$\n  - MongoDB 7.0$\r$\n  - NATS Server 2.10$\r$\n  - Nginx Web Server$\r$\n$\r$\nAll run as auto-start Windows Services with crash recovery."
+!define MUI_WELCOMEPAGE_TEXT "This will install OneShell POS on your computer.$\r$\n$\r$\nBundled components:$\r$\n  - Java Runtime (JRE 24)$\r$\n  - Node.js 20$\r$\n  - Python 3.11$\r$\n  - MongoDB 8.0$\r$\n  - NATS Server 2.10$\r$\n  - Nginx Web Server$\r$\n$\r$\nAll run as auto-start Windows Services with crash recovery."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -93,6 +93,12 @@ Section "Install"
     File "${BUNDLE_DIR}/monitor/OneShellMonitor.exe"
     SetOutPath "$INSTDIR\monitor\public"
     File /r "${BUNDLE_DIR}/monitor/public/*"
+
+    ; Tray App
+    DetailPrint "Installing Tray App..."
+    SetOutPath "$INSTDIR\tray"
+    File /nonfatal "${BUNDLE_DIR}/tray/OneShellTray.exe"
+    File /nonfatal "${BUNDLE_DIR}/tray/tray.js"
 
     ; ======= Application artifacts =======
     DetailPrint "Installing POS applications..."
@@ -247,6 +253,13 @@ Section "Install"
     CreateShortcut "$SMPROGRAMS\OneShell POS\Stop Services.lnk" "$INSTDIR\Stop-OneShell.bat" "" "$INSTDIR\icon.ico" 0
     CreateShortcut "$SMPROGRAMS\OneShell POS\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\icon.ico" 0
 
+    ; ======= Tray app auto-start on login =======
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray" '"$INSTDIR\tray\OneShellTray.exe"'
+
+    ; Launch tray app now
+    IfFileExists "$INSTDIR\tray\OneShellTray.exe" 0 +2
+    Exec '"$INSTDIR\tray\OneShellTray.exe"'
+
     ; Open monitor in browser (skip for silent/auto-update)
     IfSilent +2
     ExecShell "open" "http://localhost:3005"
@@ -286,7 +299,13 @@ Section "Uninstall"
 
     Sleep 2000
 
+    ; Remove tray from startup
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray"
+    ; Kill tray app if running
+    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
+
     ; Remove files (keep data!)
+    RMDir /r "$INSTDIR\tray"
     RMDir /r "$INSTDIR\jre"
     RMDir /r "$INSTDIR\node"
     RMDir /r "$INSTDIR\python"

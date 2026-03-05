@@ -6,13 +6,14 @@ Single `.exe` installer that sets up the complete OneShell POS system on Windows
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Java JRE | 21 | PosClientBackend runtime |
+| Java JRE | 24 | PosClientBackend runtime |
 | Node.js | 20 LTS | PosNodeBackend runtime |
 | Python | 3.11 | PosPythonBackend runtime |
-| MongoDB | 7.0 | Database |
+| MongoDB | 8.0 | Database |
 | NATS | 2.10 | Message broker with JetStream |
 | Nginx | 1.26 | Frontend web server + reverse proxy |
 | Monitor | - | Status dashboard at `localhost:3005` |
+| Tray App | - | System tray icon with status + quick actions |
 
 ## Windows Services Registered
 
@@ -66,6 +67,22 @@ Access at **http://localhost:3005** — provides:
 - **Logs** — Per-service log viewer
 
 Auto-refreshes every 10 seconds.
+
+## System Tray Icon
+
+A tray icon runs in the notification area showing service status:
+
+- **Green icon** — All services running
+- **Yellow icon** — Some services down
+- **Red icon** — Critical services (MongoDB/NATS) down
+
+Right-click menu:
+- **Open POS** — Opens `http://localhost` in browser
+- **Open Monitor** — Opens `http://localhost:3005`
+- **Start All / Stop All** — Manage all services
+- **Exit** — Close tray icon (services keep running)
+
+Starts automatically on Windows login.
 
 ## Auto-Updates
 
@@ -171,6 +188,7 @@ OneshellInstaller/
 ├── build-installer.sh          # Master build script (clones repos, builds, packages)
 ├── installer.nsi               # NSIS installer script
 ├── index.js                    # Monitor dashboard server (Express.js)
+├── tray.js                     # System tray icon app
 ├── package.json                # Node.js project config
 ├── version.txt                 # Current version
 ├── public/                     # Monitor web UI

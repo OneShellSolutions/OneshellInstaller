@@ -5,10 +5,10 @@ set -euo pipefail
 # OneShell POS - Master Installer Builder
 #
 # This script:
-#   1. Downloads all runtimes (JRE, Node, Python, MongoDB, NATS, Nginx)
+#   1. Downloads all runtimes (JRE 24, Node 20, Python 3.11, MongoDB 8, NATS)
 #   2. Clones & builds each app from GitHub repos
-#   3. Packages the monitoring dashboard via `pkg`
-#   4. Assembles everything into an NSIS installer
+#   3. Packages the monitoring dashboard + tray icon via `pkg`
+#   4. Assembles everything into an NSIS installer (Windows only)
 #
 # Prerequisites:
 #   macOS:  brew install makensis node maven
@@ -33,17 +33,17 @@ GITHUB_ORG="OneShellSolutions"
 # Dependency versions
 # ============================================
 WINSW_VERSION="3.0.0-alpha.11"
-JRE_VERSION="21.0.5+11"
+JRE_VERSION="24+36"
 NODE_VERSION="20.18.1"
 PYTHON_VERSION="3.11.9"
-MONGODB_VERSION="7.0.14"
+MONGODB_VERSION="8.0.4"
 NATS_VERSION="2.10.22"
 NGINX_VERSION="1.26.2"
 
 # Download URLs
 WINSW_URL="https://github.com/winsw/winsw/releases/download/v${WINSW_VERSION}/WinSW-x64.exe"
-JRE_ARCHIVE="OpenJDK21U-jre_x64_windows_hotspot_$(echo $JRE_VERSION | tr '+' '_').zip"
-JRE_URL="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-${JRE_VERSION}/${JRE_ARCHIVE}"
+JRE_ARCHIVE="OpenJDK24U-jre_x64_windows_hotspot_$(echo $JRE_VERSION | tr '+' '_').zip"
+JRE_URL="https://github.com/adoptium/temurin24-binaries/releases/download/jdk-${JRE_VERSION}/${JRE_ARCHIVE}"
 NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip"
 PYTHON_URL="https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip"
 PYTHON_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
@@ -81,15 +81,15 @@ clone_or_pull() {
 # Create directories
 mkdir -p "${CACHE_DIR}" "${REPOS_DIR}"
 rm -rf "${BUNDLE_DIR}"
-mkdir -p "${BUNDLE_DIR}"/{jre,node,python,mongodb/bin,nats,nginx,monitor/public,services,config,updater}
+mkdir -p "${BUNDLE_DIR}"/{jre,node,python,mongodb/bin,nats,nginx,monitor/public,tray,services,config,updater}
 mkdir -p "${BUNDLE_DIR}"/apps/{posbackend,posNodeBackend,posFrontend,PosPythonBackend}
 
 # ============================================
 # Step 1: Download runtimes
 # ============================================
-echo "[1/9] Downloading runtimes..."
+echo "[1/10] Downloading runtimes..."
 download_cached "${WINSW_URL}" "WinSW-x64.exe" "WinSW ${WINSW_VERSION}"
-download_cached "${JRE_URL}" "${JRE_ARCHIVE}" "JRE 21"
+download_cached "${JRE_URL}" "${JRE_ARCHIVE}" "JRE 24"
 download_cached "${NODE_URL}" "node-${NODE_VERSION}.zip" "Node.js ${NODE_VERSION}"
 download_cached "${PYTHON_URL}" "python-${PYTHON_VERSION}.zip" "Python ${PYTHON_VERSION}"
 download_cached "${PYTHON_PIP_URL}" "get-pip.py" "pip installer"
@@ -101,7 +101,7 @@ echo "       All runtimes ready."
 # ============================================
 # Step 2: Extract runtimes into bundle
 # ============================================
-echo "[2/9] Extracting runtimes..."
+echo "[2/10] Extracting runtimes..."
 
 # JRE
 rm -rf "${CACHE_DIR}/jre-extract"
@@ -152,7 +152,7 @@ echo "       Runtimes extracted."
 # ============================================
 # Step 3: Clone & build PosClientBackend (Java)
 # ============================================
-echo "[3/9] Building PosClientBackend..."
+echo "[3/10] Building PosClientBackend..."
 clone_or_pull "PosClientBackend" "${REPOS_DIR}/PosClientBackend"
 
 # Build oneshell-commons first if needed
@@ -174,7 +174,7 @@ fi
 # ============================================
 # Step 4: Clone PosNodeBackend (Node.js)
 # ============================================
-echo "[4/9] Preparing PosNodeBackend..."
+echo "[4/10] Preparing PosNodeBackend..."
 clone_or_pull "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend"
 # Copy app files (exclude .git, node_modules)
 rsync -a --exclude='.git' --exclude='node_modules' --exclude='.env' \
@@ -184,7 +184,7 @@ echo "       PosNodeBackend ready."
 # ============================================
 # Step 5: Clone & build PosFrontend (React)
 # ============================================
-echo "[5/9] Building PosFrontend..."
+echo "[5/10] Building PosFrontend..."
 clone_or_pull "PosFrontend" "${REPOS_DIR}/PosFrontend"
 echo "       Installing frontend dependencies..."
 (cd "${REPOS_DIR}/PosFrontend" && npm install --silent 2>/dev/null)
@@ -209,7 +209,7 @@ fi
 # ============================================
 # Step 6: Clone PosPythonBackend
 # ============================================
-echo "[6/9] Preparing PosPythonBackend..."
+echo "[6/10] Preparing PosPythonBackend..."
 clone_or_pull "PosPythonBackend" "${REPOS_DIR}/PosPythonBackend"
 rsync -a --exclude='.git' --exclude='__pycache__' --exclude='.env' --exclude='venv' \
     "${REPOS_DIR}/PosPythonBackend/" "${BUNDLE_DIR}/apps/PosPythonBackend/"
@@ -218,7 +218,7 @@ echo "       PosPythonBackend ready."
 # ============================================
 # Step 7: Build Monitor Dashboard (pkg → EXE)
 # ============================================
-echo "[7/9] Building Monitor Dashboard..."
+echo "[7/10] Building Monitor Dashboard..."
 (cd "$SCRIPT_DIR" && npm install --silent 2>/dev/null)
 if command -v pkg &>/dev/null || npx pkg --version &>/dev/null 2>&1; then
     (cd "$SCRIPT_DIR" && npx pkg -t node18-win-x64 -o "${BUNDLE_DIR}/monitor/OneShellMonitor.exe" . 2>/dev/null)
@@ -232,9 +232,21 @@ fi
 cp -r "$SCRIPT_DIR/public/"* "${BUNDLE_DIR}/monitor/public/"
 
 # ============================================
-# Step 8: Assemble bundle
+# Step 8: Build Tray App (pkg → EXE)
 # ============================================
-echo "[8/9] Assembling bundle..."
+echo "[8/10] Building Tray App..."
+if command -v pkg &>/dev/null || npx pkg --version &>/dev/null 2>&1; then
+    (cd "$SCRIPT_DIR" && npx pkg -t node18-win-x64 -o "${BUNDLE_DIR}/tray/OneShellTray.exe" tray.js 2>/dev/null)
+    echo "       Tray EXE built."
+else
+    echo "       WARNING: pkg not available. Copying source file."
+    cp "$SCRIPT_DIR/tray.js" "${BUNDLE_DIR}/tray/"
+fi
+
+# ============================================
+# Step 9: Assemble bundle
+# ============================================
+echo "[9/10] Assembling bundle..."
 
 # Icon
 ICON_SRC=""
@@ -374,9 +386,9 @@ done
 echo "       Bundle assembled."
 
 # ============================================
-# Step 9: Build NSIS installer
+# Step 10: Build NSIS installer
 # ============================================
-echo "[9/9] Building NSIS installer..."
+echo "[10/10] Building NSIS installer..."
 if command -v makensis &>/dev/null; then
     MAKENSIS=makensis
 elif [ -f "/usr/local/bin/makensis" ]; then
