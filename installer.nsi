@@ -226,9 +226,9 @@ Section "Install"
     DetailPrint "Starting Monitor..."
     nsExec::ExecToLog 'net start OneShellMonitor'
 
-    ; ======= Auto-update scheduled task (every 6 hours) =======
+    ; ======= Auto-update scheduled task (every 10 minutes for testing, change to /SC HOURLY /MO 6 for prod) =======
     DetailPrint "Creating auto-update task..."
-    nsExec::ExecToLog 'schtasks /Create /SC HOURLY /MO 6 /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
+    nsExec::ExecToLog 'schtasks /Create /SC MINUTE /MO 10 /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
 
     ; ======= Firewall rules =======
     DetailPrint "Configuring firewall..."

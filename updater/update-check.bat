@@ -28,14 +28,13 @@ if exist "%VERSION_FILE%" (
 )
 call :log "Current version: %LOCAL_VERSION%"
 
-:: Skip if last check was less than 5 hours ago (prevents rapid retries)
+:: Skip if last check was less than 8 minutes ago (testing: 8min, prod: change to 5 hours / TotalHours -lt 5)
 set LAST_CHECK_FILE=%~dp0last-check.txt
 if exist "%LAST_CHECK_FILE%" (
     for /f "tokens=*" %%t in (%LAST_CHECK_FILE%) do set LAST_CHECK=%%t
-    :: PowerShell time diff check - skip if < 5 hours
-    for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { $last = [datetime]::Parse('%LAST_CHECK%'); if (([datetime]::Now - $last).TotalHours -lt 5) { 'SKIP' } else { 'OK' } } catch { 'OK' }"') do set CHECK_RESULT=%%r
+    for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { $last = [datetime]::Parse('%LAST_CHECK%'); if (([datetime]::Now - $last).TotalMinutes -lt 8) { 'SKIP' } else { 'OK' } } catch { 'OK' }"') do set CHECK_RESULT=%%r
     if "!CHECK_RESULT!"=="SKIP" (
-        call :log "Skipping: last check was less than 5 hours ago."
+        call :log "Skipping: last check was less than 8 minutes ago."
         goto :done
     )
 )
