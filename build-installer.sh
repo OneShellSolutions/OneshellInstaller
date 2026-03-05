@@ -71,17 +71,36 @@ get_latest_tag() {
     echo "${tag:-master}"
 }
 
-# Initialize defaults to empty (will auto-detect)
-ONESHELL_COMMONS_TAG=""
-POS_CLIENT_BACKEND_TAG=""
-POS_NODE_BACKEND_TAG=""
-POS_FRONTEND_TAG=""
-POS_PYTHON_BACKEND_TAG=""
+# Tags can come from 3 sources (in priority order):
+#   1. Environment variables (set by CI workflow inputs)
+#   2. components.conf file (local overrides)
+#   3. Auto-detect from GitHub API (latest release tag)
+#
+# Empty = auto-detect
 
-# Load overrides from components.conf if it exists
+# Start with env vars (already set by CI, or empty)
+ONESHELL_COMMONS_TAG="${ONESHELL_COMMONS_TAG:-}"
+POS_CLIENT_BACKEND_TAG="${POS_CLIENT_BACKEND_TAG:-}"
+POS_NODE_BACKEND_TAG="${POS_NODE_BACKEND_TAG:-}"
+POS_FRONTEND_TAG="${POS_FRONTEND_TAG:-}"
+POS_PYTHON_BACKEND_TAG="${POS_PYTHON_BACKEND_TAG:-}"
+
+# Load from components.conf only if env var is empty
 if [ -f "$SCRIPT_DIR/components.conf" ]; then
     echo "Loading overrides from components.conf..."
+    # Save current env values
+    _env_commons="$ONESHELL_COMMONS_TAG"
+    _env_client="$POS_CLIENT_BACKEND_TAG"
+    _env_node="$POS_NODE_BACKEND_TAG"
+    _env_frontend="$POS_FRONTEND_TAG"
+    _env_python="$POS_PYTHON_BACKEND_TAG"
     source "$SCRIPT_DIR/components.conf"
+    # Env vars take priority over components.conf
+    [ -n "$_env_commons" ] && ONESHELL_COMMONS_TAG="$_env_commons"
+    [ -n "$_env_client" ] && POS_CLIENT_BACKEND_TAG="$_env_client"
+    [ -n "$_env_node" ] && POS_NODE_BACKEND_TAG="$_env_node"
+    [ -n "$_env_frontend" ] && POS_FRONTEND_TAG="$_env_frontend"
+    [ -n "$_env_python" ] && POS_PYTHON_BACKEND_TAG="$_env_python"
 fi
 
 # Auto-detect versions for anything not pinned in components.conf

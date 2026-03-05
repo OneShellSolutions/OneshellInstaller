@@ -7,8 +7,28 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number (e.g. 1.0.0)'
+        description: 'Installer version (e.g. 1.0.0)'
         required: true
+      oneshell_commons_tag:
+        description: 'oneshell-commons tag (empty = latest release)'
+        required: false
+        default: ''
+      pos_client_backend_tag:
+        description: 'PosClientBackend tag (empty = latest release)'
+        required: false
+        default: ''
+      pos_node_backend_tag:
+        description: 'PosNodeBackend tag (empty = latest release)'
+        required: false
+        default: ''
+      pos_frontend_tag:
+        description: 'PosFrontend tag (empty = latest release)'
+        required: false
+        default: ''
+      pos_python_backend_tag:
+        description: 'PosPythonBackend tag (empty = latest release)'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -72,17 +92,12 @@ jobs:
           chmod +x build-installer.sh
           ./build-installer.sh ${{ steps.version.outputs.VERSION }}
         env:
-          # Used by build script for GitHub API calls (auto-detect latest tags)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read manifest
-        id: manifest
-        run: |
-          if [ -f target/bundle/manifest.json ]; then
-            echo "MANIFEST<<EOF" >> $GITHUB_OUTPUT
-            cat target/bundle/manifest.json >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
+          ONESHELL_COMMONS_TAG: ${{ github.event.inputs.oneshell_commons_tag }}
+          POS_CLIENT_BACKEND_TAG: ${{ github.event.inputs.pos_client_backend_tag }}
+          POS_NODE_BACKEND_TAG: ${{ github.event.inputs.pos_node_backend_tag }}
+          POS_FRONTEND_TAG: ${{ github.event.inputs.pos_frontend_tag }}
+          POS_PYTHON_BACKEND_TAG: ${{ github.event.inputs.pos_python_backend_tag }}
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -118,7 +133,6 @@ jobs:
             | Nginx | 1.26.2 |
 
             ### Application Versions
-            Versions auto-detected from latest release tags of each repo.
             See `manifest.json` for exact tags used in this build.
 
             ### Install
