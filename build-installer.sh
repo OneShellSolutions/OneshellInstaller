@@ -208,14 +208,16 @@ else
 fi
 
 # ============================================
-# Step 4: Clone PosNodeBackend (Node.js)
+# Step 4: Clone PosNodeBackend (Node.js) + install deps
 # ============================================
 echo "[4/10] Preparing PosNodeBackend..."
 clone_at_tag "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend" "${POS_NODE_BACKEND_TAG}"
-# Copy app files (exclude .git, node_modules)
-rsync -a --exclude='.git' --exclude='node_modules' --exclude='.env' \
+echo "       Installing Node.js production dependencies..."
+(cd "${REPOS_DIR}/PosNodeBackend" && npm install --production --silent 2>/dev/null)
+# Copy app files WITH node_modules (pre-installed), exclude dev stuff
+rsync -a --exclude='.git' --exclude='.env' --exclude='.github' \
     "${REPOS_DIR}/PosNodeBackend/" "${BUNDLE_DIR}/apps/posNodeBackend/"
-echo "       PosNodeBackend ready."
+echo "       PosNodeBackend ready (with node_modules)."
 
 # ============================================
 # Step 5: Clone & build PosFrontend (React)
@@ -244,12 +246,34 @@ else
 fi
 
 # ============================================
-# Step 6: Clone PosPythonBackend
+# Step 6: Clone PosPythonBackend + install deps into bundle
 # ============================================
 echo "[6/10] Preparing PosPythonBackend..."
 clone_at_tag "PosPythonBackend" "${REPOS_DIR}/PosPythonBackend" "${POS_PYTHON_BACKEND_TAG}"
 rsync -a --exclude='.git' --exclude='__pycache__' --exclude='.env' --exclude='venv' \
     "${REPOS_DIR}/PosPythonBackend/" "${BUNDLE_DIR}/apps/PosPythonBackend/"
+
+# Pre-download Python wheels for offline install on customer machine
+echo "       Downloading Python wheels for offline install..."
+mkdir -p "${CACHE_DIR}/python-wheels" "${BUNDLE_DIR}/python/wheels"
+if [ -f "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" ]; then
+    # Download pip + setuptools wheels (needed for get-pip.py offline)
+    pip download pip setuptools \
+        --dest "${CACHE_DIR}/python-wheels" \
+        --platform win_amd64 --python-version 3.11 --only-binary=:all: 2>/dev/null || \
+    pip download pip setuptools \
+        --dest "${CACHE_DIR}/python-wheels" 2>/dev/null || true
+
+    # Download all dependency wheels for Windows
+    pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
+        --dest "${CACHE_DIR}/python-wheels" \
+        --platform win_amd64 --python-version 3.11 --only-binary=:all: 2>/dev/null || \
+    pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
+        --dest "${CACHE_DIR}/python-wheels" 2>/dev/null || true
+
+    cp "${CACHE_DIR}/python-wheels/"* "${BUNDLE_DIR}/python/wheels/" 2>/dev/null || true
+    echo "       Python wheels ready for offline install."
+fi
 echo "       PosPythonBackend ready."
 
 # ============================================

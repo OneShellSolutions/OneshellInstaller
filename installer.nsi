@@ -67,7 +67,7 @@ Section "Install"
     SetOutPath "$INSTDIR\node"
     File /r "${BUNDLE_DIR}/node/*"
 
-    ; Python
+    ; Python (with pre-downloaded wheels for offline pip install)
     DetailPrint "Installing Python..."
     SetOutPath "$INSTDIR\python"
     File /r "${BUNDLE_DIR}/python/*"
@@ -163,16 +163,15 @@ Section "Install"
     CreateDirectory "$INSTDIR\logs\nginx"
     CreateDirectory "$INSTDIR\logs\monitor"
 
-    ; ======= Install Python pip + deps =======
-    DetailPrint "Installing Python dependencies..."
-    IfFileExists "$INSTDIR\apps\PosPythonBackend\requirements.txt" 0 +3
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --quiet'
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install -r "$INSTDIR\apps\PosPythonBackend\requirements.txt" --quiet'
+    ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
+    DetailPrint "Installing Python dependencies (offline)..."
+    IfFileExists "$INSTDIR\python\wheels\pip*" 0 +3
+        ; Install pip itself from bundled wheel (no internet needed)
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --no-index --find-links "$INSTDIR\python\wheels" --quiet'
+        ; Install all app dependencies from bundled wheels (no internet needed)
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\python\wheels" -r "$INSTDIR\apps\PosPythonBackend\requirements.txt" --quiet'
 
-    ; ======= Install Node deps =======
-    DetailPrint "Installing Node.js dependencies..."
-    IfFileExists "$INSTDIR\apps\posNodeBackend\package.json" 0 +2
-        nsExec::ExecToLog '"$INSTDIR\node\npm.cmd" install --production --prefix "$INSTDIR\apps\posNodeBackend"'
+    ; Node.js: node_modules pre-installed in bundle, nothing to do on customer machine
 
     ; ======= Version file =======
     SetOutPath "$INSTDIR"
