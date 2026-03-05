@@ -139,7 +139,20 @@ sudo apt install nsis nodejs maven
 npm i -g pkg
 ```
 
-### Build
+### Configure Component Tags
+
+Edit `components.conf` to set which tag/branch each app repo should use:
+
+```bash
+# components.conf
+ONESHELL_COMMONS_TAG="master"
+POS_CLIENT_BACKEND_TAG="v1.2.0"    # specific release tag
+POS_NODE_BACKEND_TAG="master"       # latest master
+POS_FRONTEND_TAG="v2.0.0"
+POS_PYTHON_BACKEND_TAG="master"
+```
+
+### Build Locally
 
 ```bash
 git clone https://github.com/OneShellSolutions/OneshellInstaller.git
@@ -148,28 +161,37 @@ cd OneshellInstaller
 ```
 
 This will:
-1. Download all runtimes (cached in `target/cache/` for subsequent builds)
-2. Clone and build each app repo from `OneShellSolutions/` GitHub org:
+1. Download all runtimes (cached in `target/cache/`)
+2. Clone each app repo from `OneShellSolutions/` GitHub org **at the configured tag**:
+   - `oneshell-commons` → `mvnw clean install` (shared library)
    - `PosClientBackend` → `mvnw clean package` → JAR
    - `PosNodeBackend` → copy Node.js app
-   - `PosFrontend` → `npm run build` → static files
+   - `PosFrontend` → `npm run build` → static files for Nginx
    - `PosPythonBackend` → copy Python app
-3. Build the Monitor dashboard via `pkg` → Windows EXE
+3. Build Monitor dashboard + Tray app via `pkg` → Windows EXEs
 4. Assemble everything into NSIS bundle
 5. Output: `target/OneShellPOS-Setup-1.0.0.exe`
 
-### Release
+### Release (Automated via GitHub Actions)
 
 ```bash
-# Tag and create GitHub release
+# 1. Update components.conf with desired tags
+# 2. Update version.txt
+# 3. Commit, tag, and push
+
 git tag v1.0.0
 git push origin v1.0.0
-gh release create v1.0.0 target/OneShellPOS-Setup-1.0.0.exe \
-  --title "OneShell POS v1.0.0" \
-  --notes "Initial release"
 ```
 
-Customers with existing installations auto-update within 1 hour.
+GitHub Actions will automatically:
+1. Clone all repos at configured tags
+2. Build everything
+3. Create NSIS installer `.exe`
+4. Publish as a GitHub Release
+
+Customers with existing installations **auto-update within 1 hour**.
+
+You can also trigger a build manually from the **Actions** tab → "Build & Release Installer" → "Run workflow".
 
 ### Build Caching
 
@@ -179,13 +201,16 @@ Runtimes are cached in `target/cache/`. Delete this folder to force re-download:
 rm -rf target/cache
 ```
 
-App repos are cached in `target/repos/`. On subsequent builds, `git pull` fetches only changes.
+App repos are cached in `target/repos/`. On subsequent builds, only changed files are fetched.
 
 ## Project Structure
 
 ```
 OneshellInstaller/
+├── .github/workflows/
+│   └── build-release.yml       # GitHub Actions: tag push → build → release
 ├── build-installer.sh          # Master build script (clones repos, builds, packages)
+├── components.conf             # App repo tag/branch configuration
 ├── installer.nsi               # NSIS installer script
 ├── index.js                    # Monitor dashboard server (Express.js)
 ├── tray.js                     # System tray icon app

@@ -5,17 +5,20 @@ set -euo pipefail
 # OneShell POS - Master Installer Builder
 #
 # This script:
-#   1. Downloads all runtimes (JRE 24, Node 20, Python 3.11, MongoDB 8, NATS)
-#   2. Clones & builds each app from GitHub repos
+#   1. Downloads all runtimes (JRE 24, Node 20, Python 3.11, MongoDB 8, NATS, Nginx)
+#   2. Clones & builds each app repo at specified tags from GitHub
 #   3. Packages the monitoring dashboard + tray icon via `pkg`
-#   4. Assembles everything into an NSIS installer (Windows only)
+#   4. Assembles everything into an NSIS installer (.exe)
 #
 # Prerequisites:
 #   macOS:  brew install makensis node maven
 #   Linux:  apt install nsis nodejs maven
+#   Both:   npm i -g pkg
 #
 # Usage:
 #   ./build-installer.sh [VERSION]
+#
+# The script reads component tags from components.conf
 # ============================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,14 +26,14 @@ BUNDLE_DIR="$SCRIPT_DIR/target/bundle"
 CACHE_DIR="$SCRIPT_DIR/target/cache"
 REPOS_DIR="$SCRIPT_DIR/target/repos"
 
-# Version
+# Version (from arg, or version.txt, or default)
 VERSION="${1:-$(cat "$SCRIPT_DIR/version.txt" 2>/dev/null || echo "1.0.0")}"
 
 # GitHub org
 GITHUB_ORG="OneShellSolutions"
 
 # ============================================
-# Dependency versions
+# Runtime dependency versions
 # ============================================
 WINSW_VERSION="3.0.0-alpha.11"
 JRE_VERSION="24+36"
@@ -39,6 +42,22 @@ PYTHON_VERSION="3.11.9"
 MONGODB_VERSION="8.0.4"
 NATS_VERSION="2.10.22"
 NGINX_VERSION="1.26.2"
+
+# ============================================
+# Application repo tags (from components.conf or defaults)
+# Format in components.conf: REPO_NAME=tag_or_branch
+# ============================================
+ONESHELL_COMMONS_TAG="master"
+POS_CLIENT_BACKEND_TAG="master"
+POS_NODE_BACKEND_TAG="master"
+POS_FRONTEND_TAG="master"
+POS_PYTHON_BACKEND_TAG="master"
+
+# Load overrides from components.conf if it exists
+if [ -f "$SCRIPT_DIR/components.conf" ]; then
+    echo "Loading component tags from components.conf..."
+    source "$SCRIPT_DIR/components.conf"
+fi
 
 # Download URLs
 WINSW_URL="https://github.com/winsw/winsw/releases/download/v${WINSW_VERSION}/WinSW-x64.exe"
@@ -55,8 +74,17 @@ echo "============================================"
 echo " OneShell POS Installer Builder v${VERSION}"
 echo "============================================"
 echo ""
+echo " Component tags:"
+echo "   oneshell-commons:    ${ONESHELL_COMMONS_TAG}"
+echo "   PosClientBackend:    ${POS_CLIENT_BACKEND_TAG}"
+echo "   PosNodeBackend:      ${POS_NODE_BACKEND_TAG}"
+echo "   PosFrontend:         ${POS_FRONTEND_TAG}"
+echo "   PosPythonBackend:    ${POS_PYTHON_BACKEND_TAG}"
+echo ""
 
+# ============================================
 # Helpers
+# ============================================
 download_cached() {
     local url="$1" filename="$2" desc="$3"
     if [ -f "${CACHE_DIR}/${filename}" ]; then
@@ -67,14 +95,20 @@ download_cached() {
     fi
 }
 
-clone_or_pull() {
-    local repo="$1" dir="$2"
+# Clone repo at a specific tag/branch. If already cloned, fetch and checkout.
+clone_at_tag() {
+    local repo="$1" dir="$2" tag="$3"
     if [ -d "$dir/.git" ]; then
-        echo "       Pulling latest ${repo}..."
-        git -C "$dir" fetch origin && git -C "$dir" reset --hard origin/master 2>/dev/null || git -C "$dir" reset --hard origin/main
+        echo "       Fetching ${repo} (${tag})..."
+        git -C "$dir" fetch origin --tags --force
+        git -C "$dir" checkout "$tag" 2>/dev/null || git -C "$dir" checkout "origin/$tag" 2>/dev/null || {
+            echo "       Tag/branch '$tag' not found, using latest master/main..."
+            git -C "$dir" checkout origin/master 2>/dev/null || git -C "$dir" checkout origin/main
+        }
     else
-        echo "       Cloning ${repo}..."
-        git clone --depth 1 "https://github.com/${GITHUB_ORG}/${repo}.git" "$dir"
+        echo "       Cloning ${repo} (${tag})..."
+        git clone "https://github.com/${GITHUB_ORG}/${repo}.git" "$dir"
+        git -C "$dir" checkout "$tag" 2>/dev/null || git -C "$dir" checkout "origin/$tag" 2>/dev/null || true
     fi
 }
 
@@ -89,7 +123,7 @@ mkdir -p "${BUNDLE_DIR}"/apps/{posbackend,posNodeBackend,posFrontend,PosPythonBa
 # ============================================
 echo "[1/10] Downloading runtimes..."
 download_cached "${WINSW_URL}" "WinSW-x64.exe" "WinSW ${WINSW_VERSION}"
-download_cached "${JRE_URL}" "${JRE_ARCHIVE}" "JRE 24"
+download_cached "${JRE_URL}" "${JRE_ARCHIVE}" "JRE ${JRE_VERSION}"
 download_cached "${NODE_URL}" "node-${NODE_VERSION}.zip" "Node.js ${NODE_VERSION}"
 download_cached "${PYTHON_URL}" "python-${PYTHON_VERSION}.zip" "Python ${PYTHON_VERSION}"
 download_cached "${PYTHON_PIP_URL}" "get-pip.py" "pip installer"
@@ -150,32 +184,34 @@ rm -rf "${CACHE_DIR}/nginx-extract"
 echo "       Runtimes extracted."
 
 # ============================================
-# Step 3: Clone & build PosClientBackend (Java)
+# Step 3: Clone & build oneshell-commons + PosClientBackend (Java)
 # ============================================
 echo "[3/10] Building PosClientBackend..."
-clone_or_pull "PosClientBackend" "${REPOS_DIR}/PosClientBackend"
 
-# Build oneshell-commons first if needed
-if [ -d "/Users/manip/Documents/codeRepo/oneshell-commons" ]; then
-    echo "       Building oneshell-commons..."
-    (cd /Users/manip/Documents/codeRepo/oneshell-commons && ./mvnw clean install -DskipTests -q 2>/dev/null || true)
-fi
+# Build oneshell-commons first (shared library)
+echo "       Cloning & building oneshell-commons..."
+clone_at_tag "oneshell-commons" "${REPOS_DIR}/oneshell-commons" "${ONESHELL_COMMONS_TAG}"
+(cd "${REPOS_DIR}/oneshell-commons" && ./mvnw clean install -DskipTests -q)
+echo "       oneshell-commons installed to local Maven."
 
+# Build PosClientBackend
+clone_at_tag "PosClientBackend" "${REPOS_DIR}/PosClientBackend" "${POS_CLIENT_BACKEND_TAG}"
 echo "       Building PosClientBackend JAR..."
-(cd "${REPOS_DIR}/PosClientBackend" && ./mvnw clean package -DskipTests -q 2>/dev/null)
+(cd "${REPOS_DIR}/PosClientBackend" && ./mvnw clean package -DskipTests -q)
 JAR=$(find "${REPOS_DIR}/PosClientBackend/target" -name "*.jar" ! -name "*-sources*" ! -name "*-javadoc*" | head -1)
 if [ -n "$JAR" ]; then
     cp "$JAR" "${BUNDLE_DIR}/apps/posbackend/posbackend.jar"
     echo "       PosClientBackend JAR ready."
 else
-    echo "       WARNING: PosClientBackend JAR not found. Build may have failed."
+    echo "       ERROR: PosClientBackend JAR not found. Build failed."
+    exit 1
 fi
 
 # ============================================
 # Step 4: Clone PosNodeBackend (Node.js)
 # ============================================
 echo "[4/10] Preparing PosNodeBackend..."
-clone_or_pull "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend"
+clone_at_tag "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend" "${POS_NODE_BACKEND_TAG}"
 # Copy app files (exclude .git, node_modules)
 rsync -a --exclude='.git' --exclude='node_modules' --exclude='.env' \
     "${REPOS_DIR}/PosNodeBackend/" "${BUNDLE_DIR}/apps/posNodeBackend/"
@@ -185,11 +221,11 @@ echo "       PosNodeBackend ready."
 # Step 5: Clone & build PosFrontend (React)
 # ============================================
 echo "[5/10] Building PosFrontend..."
-clone_or_pull "PosFrontend" "${REPOS_DIR}/PosFrontend"
+clone_at_tag "PosFrontend" "${REPOS_DIR}/PosFrontend" "${POS_FRONTEND_TAG}"
 echo "       Installing frontend dependencies..."
 (cd "${REPOS_DIR}/PosFrontend" && npm install --silent 2>/dev/null)
 echo "       Building frontend..."
-(cd "${REPOS_DIR}/PosFrontend" && npm run build 2>/dev/null || npm run build-electron 2>/dev/null || true)
+(cd "${REPOS_DIR}/PosFrontend" && npm run build 2>/dev/null || true)
 
 # Find build output
 BUILD_DIR=""
@@ -203,14 +239,15 @@ if [ -n "$BUILD_DIR" ]; then
     cp -r "$BUILD_DIR"/* "${BUNDLE_DIR}/apps/posFrontend/"
     echo "       PosFrontend build ready."
 else
-    echo "       WARNING: PosFrontend build output not found."
+    echo "       ERROR: PosFrontend build output not found."
+    exit 1
 fi
 
 # ============================================
 # Step 6: Clone PosPythonBackend
 # ============================================
 echo "[6/10] Preparing PosPythonBackend..."
-clone_or_pull "PosPythonBackend" "${REPOS_DIR}/PosPythonBackend"
+clone_at_tag "PosPythonBackend" "${REPOS_DIR}/PosPythonBackend" "${POS_PYTHON_BACKEND_TAG}"
 rsync -a --exclude='.git' --exclude='__pycache__' --exclude='.env' --exclude='venv' \
     "${REPOS_DIR}/PosPythonBackend/" "${BUNDLE_DIR}/apps/PosPythonBackend/"
 echo "       PosPythonBackend ready."
@@ -248,15 +285,13 @@ fi
 # ============================================
 echo "[9/10] Assembling bundle..."
 
-# Icon
-ICON_SRC=""
-for src in "$SCRIPT_DIR/public/logo.ico" "/Users/manip/Documents/codeRepo/pos-deployment/logo.ico"; do
-    if [ -f "$src" ]; then ICON_SRC="$src"; break; fi
-done
-if [ -n "$ICON_SRC" ]; then
-    cp "$ICON_SRC" "${BUNDLE_DIR}/icon.ico"
+# Icon (from repo's public/ folder)
+if [ -f "$SCRIPT_DIR/public/icon.ico" ]; then
+    cp "$SCRIPT_DIR/public/icon.ico" "${BUNDLE_DIR}/icon.ico"
+elif [ -f "$SCRIPT_DIR/public/logo.ico" ]; then
+    cp "$SCRIPT_DIR/public/logo.ico" "${BUNDLE_DIR}/icon.ico"
 else
-    echo "       WARNING: No icon.ico found."
+    echo "       WARNING: No icon.ico found in public/. Add public/icon.ico to the repo."
 fi
 
 # WinSW service wrappers
@@ -327,9 +362,8 @@ NGINX_EOF
 # Updater
 cp "$SCRIPT_DIR/updater/update-check.bat" "${BUNDLE_DIR}/updater/"
 
-# Print utility
-PRINT_UTIL="/Users/manip/Documents/codeRepo/pos-deployment/oneshell-print-util-win.exe"
-[ -f "$PRINT_UTIL" ] && cp "$PRINT_UTIL" "${BUNDLE_DIR}/"
+# Print utility (optional - only if present in repo)
+[ -f "$SCRIPT_DIR/assets/oneshell-print-util-win.exe" ] && cp "$SCRIPT_DIR/assets/oneshell-print-util-win.exe" "${BUNDLE_DIR}/"
 
 # Management scripts
 cat > "${BUNDLE_DIR}/Start-OneShell.bat" << 'BAT'
@@ -383,6 +417,29 @@ for app in posbackend posNodeBackend posFrontend PosPythonBackend; do
     echo "${VERSION}" > "${BUNDLE_DIR}/apps/${app}/version.txt"
 done
 
+# Write manifest with all component info
+cat > "${BUNDLE_DIR}/manifest.json" << MANIFEST_EOF
+{
+  "version": "${VERSION}",
+  "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "runtimes": {
+    "jre": "${JRE_VERSION}",
+    "node": "${NODE_VERSION}",
+    "python": "${PYTHON_VERSION}",
+    "mongodb": "${MONGODB_VERSION}",
+    "nats": "${NATS_VERSION}",
+    "nginx": "${NGINX_VERSION}"
+  },
+  "components": {
+    "oneshell-commons": "${ONESHELL_COMMONS_TAG}",
+    "PosClientBackend": "${POS_CLIENT_BACKEND_TAG}",
+    "PosNodeBackend": "${POS_NODE_BACKEND_TAG}",
+    "PosFrontend": "${POS_FRONTEND_TAG}",
+    "PosPythonBackend": "${POS_PYTHON_BACKEND_TAG}"
+  }
+}
+MANIFEST_EOF
+
 echo "       Bundle assembled."
 
 # ============================================
@@ -395,7 +452,7 @@ elif [ -f "/usr/local/bin/makensis" ]; then
     MAKENSIS=/usr/local/bin/makensis
 else
     echo ""
-    echo "  NSIS not found. Install: brew install makensis"
+    echo "  NSIS not found. Install: brew install makensis (macOS) or apt install nsis (Linux)"
     echo "  Bundle is ready at: ${BUNDLE_DIR}"
     echo "  Run manually:"
     echo "    makensis -DVERSION=${VERSION} -DBUNDLE_DIR=${BUNDLE_DIR} installer.nsi"
@@ -409,9 +466,4 @@ echo "============================================"
 echo " BUILD SUCCESSFUL!"
 echo " Output: target/OneShellPOS-Setup-${VERSION}.exe"
 echo "============================================"
-echo ""
-echo " To release:"
-echo "   1. git tag v${VERSION}"
-echo "   2. gh release create v${VERSION} target/OneShellPOS-Setup-${VERSION}.exe"
-echo "   3. Customers auto-update within 1 hour"
 echo ""

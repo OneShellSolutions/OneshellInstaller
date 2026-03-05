@@ -1,0 +1,108 @@
+name: Build & Release Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.0.0)'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout installer repo
+        uses: actions/checkout@v4
+
+      - name: Set version from tag or input
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "VERSION=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Java 24
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '24'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis rsync
+          npm install -g pkg
+
+      - name: Cache runtimes
+        uses: actions/cache@v4
+        with:
+          path: target/cache
+          key: runtimes-jre${{ env.JRE_VERSION }}-mongo${{ env.MONGODB_VERSION }}-node${{ env.NODE_VERSION }}-nats${{ env.NATS_VERSION }}-nginx${{ env.NGINX_VERSION }}
+          restore-keys: runtimes-
+        env:
+          JRE_VERSION: "24+36"
+          MONGODB_VERSION: "8.0.4"
+          NODE_VERSION: "20.18.1"
+          NATS_VERSION: "2.10.22"
+          NGINX_VERSION: "1.26.2"
+
+      - name: Cache Maven repos
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ hashFiles('target/repos/**/pom.xml') }}
+          restore-keys: maven-
+
+      - name: Build installer
+        run: |
+          chmod +x build-installer.sh
+          ./build-installer.sh ${{ steps.version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}
+          path: target/OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "OneShell POS v${{ steps.version.outputs.VERSION }}"
+          files: target/OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe
+          body: |
+            ## OneShell POS v${{ steps.version.outputs.VERSION }}
+
+            ### Bundled Runtimes
+            - Java JRE 24
+            - Node.js 20.18.1
+            - Python 3.11.9
+            - MongoDB 8.0.4
+            - NATS 2.10.22
+            - Nginx 1.26.2
+
+            ### Install
+            1. Download `OneShellPOS-Setup-${{ steps.version.outputs.VERSION }}.exe`
+            2. Run as Administrator
+            3. POS at `http://localhost`, Monitor at `http://localhost:3005`
+
+            Existing installations auto-update within 1 hour.
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
