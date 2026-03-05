@@ -87,8 +87,9 @@ if not "%DL_RESULT%"=="OK" (
 call :log "Download complete. Killing tray app before update..."
 
 :: Kill tray app first (prevents file locking)
+:: Use ping instead of timeout (timeout needs interactive console and fails silently in background)
 taskkill /F /IM OneShellTray.exe >nul 2>&1
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul
 
 call :log "Running silent installer..."
 
