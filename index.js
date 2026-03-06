@@ -476,7 +476,7 @@ app.post('/api/watchdog/toggle', (req, res) => {
 // ================================================
 // Version check & auto-update
 // ================================================
-const GITHUB_REPO = 'OneShellSolutions/OneshellInstaller';
+const GITHUB_REPO = 'OneShellSolutions/OneshellInstallerExe';
 let cachedUpdateInfo = null;
 let lastUpdateCheck = 0;
 const UPDATE_CACHE_TTL = 600000; // 10 minutes

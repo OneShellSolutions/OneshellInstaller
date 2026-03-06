@@ -11,7 +11,7 @@ const INSTALL_DIR = process.pkg
 
 const MONITOR_URL = 'http://127.0.0.1:3005';
 const POS_URL = 'http://localhost';
-const GITHUB_REPO = 'OneShellSolutions/OneshellInstaller';
+const GITHUB_REPO = 'OneShellSolutions/OneshellInstallerExe';
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt');
 
 // Service health state
