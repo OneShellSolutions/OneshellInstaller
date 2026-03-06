@@ -12,10 +12,10 @@
   },
 
   "applications": {
-    "oneshell-commons": "",
-    "PosClientBackend": "",
-    "PosNodeBackend": "",
-    "PosFrontend": "",
-    "PosPythonBackend": ""
+    "oneshell-commons": "v0.3.38",
+    "PosClientBackend": "v1.10.34",
+    "PosNodeBackend": "0.0.10",
+    "PosFrontend": "v2.4.41",
+    "PosPythonBackend": "v1.2.2"
   }
 }
