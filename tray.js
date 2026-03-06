@@ -23,7 +23,7 @@ let updateAvailable = null;
 function getLocalVersion() {
     try {
         return fs.readFileSync(VERSION_FILE, 'utf8').trim();
-    } catch { return '0.0.0'; }
+    } catch (e) { return '0.0.0'; }
 }
 
 // Check services via monitor API
@@ -65,7 +65,7 @@ function checkServices() {
                 }
                 previousStatus = trayStatus;
                 updateTrayIcon();
-            } catch {
+            } catch (e) {
                 trayStatus = 'error';
                 updateTrayIcon();
             }
@@ -101,7 +101,7 @@ function checkForUpdates() {
                 } else {
                     updateAvailable = null;
                 }
-            } catch { /* ignore parse errors */ }
+            } catch (e) { /* ignore parse errors */ }
         });
     });
     req.on('error', () => {});
@@ -122,7 +122,7 @@ function showNotification(title, message, type) {
     if (trayProcess && trayProcess.stdin && !trayProcess.stdin.destroyed) {
         try {
             trayProcess.stdin.write(`NOTIFY|${type}|${title}|${message}\n`);
-        } catch { /* ignore */ }
+        } catch (e) { /* ignore */ }
     }
 }
 
@@ -280,7 +280,7 @@ function updateTrayIcon() {
     if (trayProcess && trayProcess.stdin && !trayProcess.stdin.destroyed) {
         try {
             trayProcess.stdin.write(trayStatus + '\n');
-        } catch { /* ignore write errors */ }
+        } catch (e) { /* ignore write errors */ }
     }
 }
 

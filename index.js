@@ -529,7 +529,7 @@ function checkGitHubRelease() {
 
 function getLocalVersion() {
     try { return fs.readFileSync(VERSION_FILE, 'utf8').trim(); }
-    catch { return '0.0.0'; }
+    catch (e) { return '0.0.0'; }
 }
 
 // --- Check for updates ---
@@ -567,7 +567,7 @@ app.post('/api/version/auto-update', async (req, res) => {
         } else {
             updating = false;
         }
-    } catch {
+    } catch (e) {
         updating = false;
         res.json({ success: false, message: 'Update failed.' });
     }
