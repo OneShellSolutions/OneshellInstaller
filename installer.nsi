@@ -31,28 +31,63 @@ ShowInstDetails show
 Section "Install"
     SetOutPath "$INSTDIR"
 
-    ; ======= Stop existing services =======
-    DetailPrint "Stopping existing services..."
+    ; ======= Stop existing services (reverse dependency order) =======
+    DetailPrint "Stopping services..."
+
+    ; Stop application services first (they depend on infra)
     nsExec::ExecToLog 'net stop OneShellMonitor'
     nsExec::ExecToLog 'net stop OneShellFrontend'
     nsExec::ExecToLog 'net stop OneShellPosPythonBackend'
     nsExec::ExecToLog 'net stop OneShellPosNodeBackend'
     nsExec::ExecToLog 'net stop OneShellPosBackend'
-    nsExec::ExecToLog 'net stop OneShellNATS'
-    nsExec::ExecToLog 'net stop OneShellMongoDB'
-    Sleep 3000
+    Sleep 5000
 
-    ; Kill any lingering processes (prevents file locking during upgrade)
-    nsExec::ExecToLog 'taskkill /F /IM OneShellMonitor.exe'
-    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
-    nsExec::ExecToLog 'taskkill /F /IM nginx.exe'
-    nsExec::ExecToLog 'taskkill /F /IM nats-server.exe'
-    nsExec::ExecToLog 'taskkill /F /IM mongod.exe'
-    nsExec::ExecToLog 'taskkill /F /IM node.exe'
-    nsExec::ExecToLog 'wmic process where "commandline like $\'%posbackend%$\'" call terminate'
+    ; Stop infrastructure (NATS before MongoDB since NATS depends on MongoDB)
+    nsExec::ExecToLog 'net stop OneShellNATS'
     Sleep 2000
 
-    ; Uninstall old services
+    ; Gracefully shut down MongoDB (net stop tells WinSW to send shutdown signal)
+    nsExec::ExecToLog 'net stop OneShellMongoDB'
+    ; Give MongoDB time to flush and close cleanly
+    Sleep 5000
+
+    ; ======= Kill tray app =======
+    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
+
+    ; ======= Kill lingering processes (targeted, not broad) =======
+    DetailPrint "Cleaning up processes..."
+
+    ; Kill our specific monitor exe (not all node processes)
+    nsExec::ExecToLog 'taskkill /F /IM OneShellMonitor.exe'
+
+    ; Kill nginx (only ours - running from our install dir)
+    nsExec::ExecToLog 'taskkill /F /IM nginx.exe'
+
+    ; Kill nats-server
+    nsExec::ExecToLog 'taskkill /F /IM nats-server.exe'
+
+    ; Kill Java backend: find java.exe running posbackend.jar (works on Win 10/11)
+    ; Use PowerShell instead of deprecated wmic
+    nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process java -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like \"*posbackend*\" } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+
+    ; Kill Python backend: find python.exe running our PosPythonBackend
+    nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process python* -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like \"*PosPythonBackend*\" } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+
+    ; Fallback: kill processes holding our ports (8090=java, 3001=node, 5200=python)
+    nsExec::ExecToLog 'powershell -NoProfile -Command "foreach ($p in 8090,3001,5200) { $c = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue; if ($c) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue } }"'
+
+    ; Last resort: force kill mongod if still running
+    nsExec::ExecToLog 'taskkill /F /IM mongod.exe'
+
+    ; Wait for all handles to release
+    Sleep 3000
+
+    ; ======= Verify critical processes are dead =======
+    DetailPrint "Verifying processes stopped..."
+    nsExec::ExecToLog 'powershell -NoProfile -Command "$procs = @(\"mongod\",\"nats-server\",\"nginx\",\"OneShellMonitor\",\"OneShellTray\"); $running = Get-Process -Name $procs -ErrorAction SilentlyContinue; if ($running) { Write-Output \"WARNING: Still running: $($running.Name -join \", \")\"; Start-Sleep 5 } else { Write-Output \"All processes stopped.\" }"'
+
+    ; ======= Uninstall old services =======
+    DetailPrint "Removing old service registrations..."
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellFrontendService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosPythonBackendService.exe" uninstall'
@@ -201,18 +236,24 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellFrontendService.exe" install'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" install'
 
-    ; ======= Start services (dependency order) =======
+    ; ======= Start services (dependency order with verification) =======
+
+    ; Infrastructure first
     DetailPrint "Starting MongoDB..."
     nsExec::ExecToLog 'net start OneShellMongoDB'
-    Sleep 5000
+    ; Wait for MongoDB to accept connections (poll port 27017)
+    nsExec::ExecToLog 'powershell -NoProfile -Command "for ($i=0; $i -lt 30; $i++) { try { $tcp = New-Object Net.Sockets.TcpClient; $tcp.Connect(\"127.0.0.1\", 27017); $tcp.Close(); Write-Output \"MongoDB ready.\"; break } catch { Start-Sleep 1 } }"'
 
     DetailPrint "Starting NATS..."
     nsExec::ExecToLog 'net start OneShellNATS'
-    Sleep 2000
+    ; Wait for NATS health endpoint
+    nsExec::ExecToLog 'powershell -NoProfile -Command "for ($i=0; $i -lt 15; $i++) { try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8222/healthz\" -TimeoutSec 2 -UseBasicParsing; Write-Output \"NATS ready.\"; break } catch { Start-Sleep 1 } }"'
 
+    ; Application services
     DetailPrint "Starting POS Backend..."
     nsExec::ExecToLog 'net start OneShellPosBackend'
-    Sleep 3000
+    ; Backend takes longer to start (Spring Boot), wait for actuator
+    nsExec::ExecToLog 'powershell -NoProfile -Command "for ($i=0; $i -lt 60; $i++) { try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8090/actuator/health\" -TimeoutSec 2 -UseBasicParsing; Write-Output \"POS Backend ready.\"; break } catch { Start-Sleep 2 } }"'
 
     DetailPrint "Starting Node Backend..."
     nsExec::ExecToLog 'net start OneShellPosNodeBackend'
@@ -282,7 +323,7 @@ SectionEnd
 
 ; --- Uninstaller ---
 Section "Uninstall"
-    ; Stop all services
+    ; Stop all services (reverse dependency order)
     nsExec::ExecToLog 'net stop OneShellMonitor'
     nsExec::ExecToLog 'net stop OneShellFrontend'
     nsExec::ExecToLog 'net stop OneShellPosPythonBackend'
@@ -290,6 +331,17 @@ Section "Uninstall"
     nsExec::ExecToLog 'net stop OneShellPosBackend'
     nsExec::ExecToLog 'net stop OneShellNATS'
     nsExec::ExecToLog 'net stop OneShellMongoDB'
+    Sleep 5000
+
+    ; Kill lingering processes
+    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
+    nsExec::ExecToLog 'taskkill /F /IM OneShellMonitor.exe'
+    nsExec::ExecToLog 'taskkill /F /IM nginx.exe'
+    nsExec::ExecToLog 'taskkill /F /IM nats-server.exe'
+    nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process java -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like \"*posbackend*\" } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+    nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process python* -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like \"*PosPythonBackend*\" } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+    nsExec::ExecToLog 'taskkill /F /IM mongod.exe'
+    Sleep 3000
 
     ; Uninstall services
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" uninstall'
@@ -314,8 +366,6 @@ Section "Uninstall"
 
     ; Remove tray from startup
     DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray"
-    ; Kill tray app if running
-    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
 
     ; Remove files (keep data!)
     RMDir /r "$INSTDIR\tray"
