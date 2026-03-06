@@ -169,8 +169,8 @@ Section "Install"
     CreateDirectory "$INSTDIR\logs\mongodb"
     CreateDirectory "$INSTDIR\logs\nats"
     CreateDirectory "$INSTDIR\logs\posbackend"
-    CreateDirectory "$INSTDIR\logs\posnodebackend"
-    CreateDirectory "$INSTDIR\logs\pospythonbackend"
+    CreateDirectory "$INSTDIR\logs\posNodeBackend"
+    CreateDirectory "$INSTDIR\logs\PosPythonBackend"
     CreateDirectory "$INSTDIR\logs\nginx"
     CreateDirectory "$INSTDIR\logs\monitor"
 
@@ -226,9 +226,9 @@ Section "Install"
     DetailPrint "Starting Monitor..."
     nsExec::ExecToLog 'net start OneShellMonitor'
 
-    ; ======= Auto-update scheduled task (every 10 minutes for testing, change to /SC HOURLY /MO 6 for prod) =======
+    ; ======= Auto-update scheduled task (every 6 hours) =======
     DetailPrint "Creating auto-update task..."
-    nsExec::ExecToLog 'schtasks /Create /SC MINUTE /MO 10 /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
+    nsExec::ExecToLog 'schtasks /Create /SC HOURLY /MO 6 /TN "OneShellPOS-AutoUpdate" /TR "\"$INSTDIR\updater\update-check.bat\"" /F /RL HIGHEST'
 
     ; ======= Firewall rules =======
     DetailPrint "Configuring firewall..."
@@ -266,12 +266,15 @@ Section "Install"
     ; ======= Tray app auto-start on login =======
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray" '"$INSTDIR\tray\OneShellTray.exe"'
 
-    ; Launch tray app now
+    ; Launch tray app (de-elevate for silent/service context)
+    IfSilent 0 +3
+    ; Silent mode: use cmd /c start to de-elevate from SYSTEM context
+    IfFileExists "$INSTDIR\tray\OneShellTray.exe" 0 +2
+    nsExec::Exec 'cmd /c start "" "$INSTDIR\tray\OneShellTray.exe"'
+    Goto +3
+    ; Interactive mode: launch directly and open browser
     IfFileExists "$INSTDIR\tray\OneShellTray.exe" 0 +2
     Exec '"$INSTDIR\tray\OneShellTray.exe"'
-
-    ; Open monitor in browser (skip for silent/auto-update)
-    IfSilent +2
     ExecShell "open" "http://localhost:3005"
 
     DetailPrint "OneShell POS installed successfully!"

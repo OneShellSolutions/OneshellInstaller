@@ -8,7 +8,7 @@ setlocal enabledelayedexpansion
 :: installs the latest version.
 :: ============================================
 
-set GITHUB_REPO=OneShellSolutions/oneshell-installer
+set GITHUB_REPO=OneShellSolutions/OneshellInstaller
 set INSTALL_DIR=%~dp0..
 set VERSION_FILE=%INSTALL_DIR%\version.txt
 set LOG_FILE=%~dp0update.log
@@ -28,13 +28,13 @@ if exist "%VERSION_FILE%" (
 )
 call :log "Current version: %LOCAL_VERSION%"
 
-:: Skip if last check was less than 8 minutes ago (testing: 8min, prod: change to 5 hours / TotalHours -lt 5)
+:: Skip if last check was less than 5 hours ago
 set LAST_CHECK_FILE=%~dp0last-check.txt
 if exist "%LAST_CHECK_FILE%" (
     for /f "tokens=*" %%t in (%LAST_CHECK_FILE%) do set LAST_CHECK=%%t
-    for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { $last = [datetime]::Parse('%LAST_CHECK%'); if (([datetime]::Now - $last).TotalMinutes -lt 8) { 'SKIP' } else { 'OK' } } catch { 'OK' }"') do set CHECK_RESULT=%%r
+    for /f "tokens=*" %%r in ('powershell -NoProfile -Command "try { $last = [datetime]::Parse('%LAST_CHECK%'); if (([datetime]::Now - $last).TotalHours -lt 5) { 'SKIP' } else { 'OK' } } catch { 'OK' }"') do set CHECK_RESULT=%%r
     if "!CHECK_RESULT!"=="SKIP" (
-        call :log "Skipping: last check was less than 8 minutes ago."
+        call :log "Skipping: last check was less than 5 hours ago."
         goto :done
     )
 )
@@ -81,6 +81,14 @@ del "%TEMP%\pos_dl_result.txt" 2>nul
 if not "%DL_RESULT%"=="OK" (
     call :log "ERROR: Download failed. Aborting update."
     if exist "%DOWNLOAD_PATH%" del "%DOWNLOAD_PATH%"
+    goto :done
+)
+
+:: Verify download size (must be >10MB to be a valid installer)
+for /f "tokens=*" %%s in ('powershell -NoProfile -Command "if ((Get-Item '%DOWNLOAD_PATH%').Length -gt 10MB) { 'OK' } else { 'TOO_SMALL' }"') do set SIZE_CHECK=%%s
+if not "%SIZE_CHECK%"=="OK" (
+    call :log "ERROR: Downloaded file too small (corrupted/truncated). Aborting."
+    del "%DOWNLOAD_PATH%"
     goto :done
 )
 

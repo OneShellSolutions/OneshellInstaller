@@ -3,6 +3,7 @@ const { exec, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
 
 const app = express();
 const PORT = 3005;
@@ -149,8 +150,20 @@ function getComponentVersion(componentId) {
 }
 
 // --- Helper: read log tail ---
+// Map service IDs to actual log directory names
+const LOG_DIR_MAP = {
+    'OneShellMongoDB': 'mongodb',
+    'OneShellNATS': 'nats',
+    'OneShellPosBackend': 'posbackend',
+    'OneShellPosNodeBackend': 'posNodeBackend',
+    'OneShellPosPythonBackend': 'PosPythonBackend',
+    'OneShellFrontend': 'nginx',
+    'OneShellMonitor': 'monitor'
+};
+
 function readLogTail(serviceId, lines = 50) {
-    const logDir = path.join(LOGS_DIR, serviceId.replace('OneShell', '').toLowerCase());
+    const dirName = LOG_DIR_MAP[serviceId] || serviceId.replace('OneShell', '').toLowerCase();
+    const logDir = path.join(LOGS_DIR, dirName);
     if (!fs.existsSync(logDir)) return 'No logs found.';
 
     const files = fs.readdirSync(logDir)
@@ -369,6 +382,195 @@ app.post('/api/updater/check', (req, res) => {
             message: error ? stderr || error.message : 'Update check triggered.'
         });
     });
+});
+
+// ================================================
+// Watchdog: auto-restart crashed services
+// ================================================
+const RESTART_ORDER = ['OneShellMongoDB', 'OneShellNATS', 'OneShellPosBackend',
+    'OneShellPosNodeBackend', 'OneShellPosPythonBackend', 'OneShellFrontend'];
+
+// Track restart attempts to avoid restart storms
+const restartAttempts = {};
+const RESTART_COOLDOWN_MS = 120000; // 2 minutes between restart attempts per service
+let watchdogEnabled = true;
+
+async function watchdogCheck() {
+    if (!watchdogEnabled) return;
+
+    // Check infrastructure first, then applications (dependency order)
+    const ordered = [...SERVICES].sort((a, b) => {
+        const order = { infrastructure: 0, application: 1, system: 2 };
+        return (order[a.type] || 1) - (order[b.type] || 1);
+    });
+
+    for (const svc of ordered) {
+        if (svc.type === 'system') continue; // Don't watchdog the monitor itself
+
+        const status = await getServiceStatus(svc.serviceId);
+        if (status.state === 'STOPPED') {
+            const now = Date.now();
+            const lastAttempt = restartAttempts[svc.serviceId] || 0;
+            if (now - lastAttempt < RESTART_COOLDOWN_MS) continue;
+
+            // Check if dependencies are running before restarting
+            const deps = getDependencies(svc.serviceId);
+            let depsOk = true;
+            for (const dep of deps) {
+                const depStatus = await getServiceStatus(dep);
+                if (!depStatus.running) { depsOk = false; break; }
+            }
+            if (!depsOk) {
+                console.log(`[Watchdog] Skipping ${svc.name} - dependencies not ready.`);
+                continue;
+            }
+
+            console.log(`[Watchdog] Service ${svc.name} is ${status.state}, restarting...`);
+            restartAttempts[svc.serviceId] = now;
+
+            exec(`net start "${svc.serviceId}"`, (error, stdout, stderr) => {
+                if (error) {
+                    console.log(`[Watchdog] Failed to restart ${svc.name}: ${stderr || error.message}`);
+                } else {
+                    console.log(`[Watchdog] ${svc.name} restarted successfully.`);
+                }
+            });
+
+            // Wait 5 seconds after starting an infrastructure service before continuing
+            if (svc.type === 'infrastructure') {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+        } else if (status.state === 'RUNNING') {
+            delete restartAttempts[svc.serviceId];
+        }
+    }
+}
+
+// Service dependency map (from WinSW <depend> tags)
+function getDependencies(serviceId) {
+    const deps = {
+        'OneShellNATS': ['OneShellMongoDB'],
+        'OneShellPosBackend': ['OneShellMongoDB', 'OneShellNATS'],
+        'OneShellPosNodeBackend': ['OneShellMongoDB'],
+        'OneShellPosPythonBackend': ['OneShellPosBackend'],
+        'OneShellFrontend': ['OneShellPosBackend']
+    };
+    return deps[serviceId] || [];
+}
+
+// Run watchdog every 30 seconds
+setInterval(watchdogCheck, 30000);
+// Initial check after 60 seconds (give services time to start)
+setTimeout(watchdogCheck, 60000);
+
+// --- Watchdog control ---
+app.get('/api/watchdog', (req, res) => {
+    res.json({ success: true, enabled: watchdogEnabled, restartAttempts });
+});
+
+app.post('/api/watchdog/toggle', (req, res) => {
+    watchdogEnabled = !watchdogEnabled;
+    res.json({ success: true, enabled: watchdogEnabled });
+});
+
+// ================================================
+// Version check & auto-update
+// ================================================
+const GITHUB_REPO = 'OneShellSolutions/OneshellInstaller';
+let cachedUpdateInfo = null;
+let lastUpdateCheck = 0;
+const UPDATE_CACHE_TTL = 600000; // 10 minutes
+
+function checkGitHubRelease() {
+    return new Promise((resolve) => {
+        const options = {
+            hostname: 'api.github.com',
+            path: `/repos/${GITHUB_REPO}/releases/latest`,
+            headers: { 'User-Agent': 'OneShellPOS-Monitor' },
+            timeout: 15000
+        };
+
+        const req = https.get(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const release = JSON.parse(data);
+                    const remoteTag = release.tag_name || '';
+                    const remoteVersion = remoteTag.replace(/^v/, '');
+                    const localVersion = fs.existsSync(VERSION_FILE)
+                        ? fs.readFileSync(VERSION_FILE, 'utf8').trim()
+                        : '0.0.0';
+
+                    const updateInfo = {
+                        currentVersion: localVersion,
+                        latestVersion: remoteVersion,
+                        latestTag: remoteTag,
+                        updateAvailable: remoteVersion !== localVersion && remoteVersion !== '',
+                        releaseUrl: release.html_url || '',
+                        publishedAt: release.published_at || '',
+                        checkedAt: new Date().toISOString()
+                    };
+
+                    cachedUpdateInfo = updateInfo;
+                    lastUpdateCheck = Date.now();
+                    resolve(updateInfo);
+                } catch (e) {
+                    resolve({ error: 'Failed to parse GitHub response', currentVersion: getLocalVersion() });
+                }
+            });
+        });
+        req.on('error', (e) => {
+            resolve({ error: e.message, currentVersion: getLocalVersion() });
+        });
+        req.end();
+    });
+}
+
+function getLocalVersion() {
+    try { return fs.readFileSync(VERSION_FILE, 'utf8').trim(); }
+    catch { return '0.0.0'; }
+}
+
+// --- Check for updates ---
+app.get('/api/version/check', async (req, res) => {
+    if (cachedUpdateInfo && (Date.now() - lastUpdateCheck) < UPDATE_CACHE_TTL) {
+        return res.json({ success: true, ...cachedUpdateInfo, cached: true });
+    }
+    const info = await checkGitHubRelease();
+    res.json({ success: true, ...info });
+});
+
+// --- Trigger auto-update (download + silent install) ---
+let updating = false;
+app.post('/api/version/auto-update', async (req, res) => {
+    if (updating) {
+        return res.json({ success: false, message: 'Update already in progress.' });
+    }
+
+    updating = true;
+    try {
+        const info = await checkGitHubRelease();
+        if (!info.updateAvailable) {
+            updating = false;
+            return res.json({ success: false, message: 'Already up to date.', ...info });
+        }
+
+        res.json({ success: true, message: `Downloading v${info.latestVersion}...` });
+
+        // Run the update-check.bat which handles download + silent install
+        const batFile = path.join(INSTALL_DIR, 'updater', 'update-check.bat');
+        if (fs.existsSync(batFile)) {
+            exec(`"${batFile}"`, { cwd: path.join(INSTALL_DIR, 'updater'), timeout: 600000 }, () => {
+                updating = false;
+            });
+        } else {
+            updating = false;
+        }
+    } catch {
+        updating = false;
+        res.json({ success: false, message: 'Update failed.' });
+    }
 });
 
 // --- Health endpoint (for the monitor itself) ---

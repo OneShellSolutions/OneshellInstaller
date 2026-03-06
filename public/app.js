@@ -271,6 +271,66 @@ async function checkUpdates() {
     }
 }
 
+async function checkVersionUpdate() {
+    const el = document.getElementById('update-version-info');
+    const statusEl = document.getElementById('update-status');
+    const btnUpdate = document.getElementById('btn-auto-update');
+    if (el) el.textContent = 'Checking GitHub for updates...';
+    try {
+        const res = await fetch('/api/version/check');
+        const data = await res.json();
+        if (data.updateAvailable) {
+            el.innerHTML = `<strong style="color:#3fb950;">Update available!</strong> Current: v${data.currentVersion} &rarr; Latest: v${data.latestVersion}`;
+            if (btnUpdate) btnUpdate.style.display = 'inline-block';
+        } else if (data.error) {
+            el.textContent = 'Error checking: ' + data.error;
+        } else {
+            el.innerHTML = `<strong>Up to date.</strong> Version: v${data.currentVersion}`;
+            if (btnUpdate) btnUpdate.style.display = 'none';
+        }
+        if (statusEl) statusEl.textContent = data.checkedAt ? 'Last checked: ' + new Date(data.checkedAt).toLocaleString() : '';
+    } catch (e) {
+        if (el) el.textContent = 'Error: ' + e.message;
+    }
+}
+
+async function triggerAutoUpdate() {
+    if (!confirm('This will download and install the latest version. Services will restart. Continue?')) return;
+    const statusEl = document.getElementById('update-status');
+    if (statusEl) statusEl.textContent = 'Downloading and installing update...';
+    try {
+        const res = await fetch('/api/version/auto-update', { method: 'POST' });
+        const data = await res.json();
+        if (statusEl) statusEl.textContent = data.message;
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    }
+}
+
+async function toggleWatchdog() {
+    try {
+        const res = await fetch('/api/watchdog/toggle', { method: 'POST' });
+        const data = await res.json();
+        const btn = document.getElementById('btn-watchdog');
+        if (btn) {
+            btn.textContent = 'Watchdog: ' + (data.enabled ? 'ON' : 'OFF');
+            btn.style.borderColor = data.enabled ? '#238636' : '#f85149';
+        }
+    } catch (e) { console.error('Watchdog toggle failed:', e); }
+}
+
+async function loadWatchdogStatus() {
+    try {
+        const res = await fetch('/api/watchdog');
+        const data = await res.json();
+        const btn = document.getElementById('btn-watchdog');
+        if (btn) {
+            btn.textContent = 'Watchdog: ' + (data.enabled ? 'ON' : 'OFF');
+            btn.style.borderColor = data.enabled ? '#238636' : '#f85149';
+        }
+    } catch { /* ignore */ }
+}
+
 // ================================================
 // Logs Page
 // ================================================
@@ -321,3 +381,4 @@ function startAutoRefresh() {
 
 // Initialize
 startAutoRefresh();
+loadWatchdogStatus();

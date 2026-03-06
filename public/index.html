@@ -33,7 +33,8 @@
 
         <div class="actions-bar">
             <button class="btn btn-primary" onclick="restartAll()">Restart All Services</button>
-            <button class="btn btn-secondary" onclick="checkUpdates()">Check for Updates</button>
+            <button class="btn btn-secondary" onclick="toggleWatchdog()" id="btn-watchdog">Watchdog: ON</button>
+            <button class="btn btn-secondary" onclick="checkVersionUpdate()">Check Updates</button>
             <a href="http://localhost" target="_blank" class="btn btn-success">Open POS</a>
         </div>
     </div>
@@ -58,8 +59,10 @@
             <div id="component-versions"></div>
         </div>
         <div class="card">
-            <h3>Update Actions</h3>
-            <button class="btn btn-primary" onclick="checkUpdates()">Check for Updates Now</button>
+            <h3>Update Status</h3>
+            <div id="update-version-info" class="status-text" style="margin-bottom:12px;"></div>
+            <button class="btn btn-primary" onclick="checkVersionUpdate()">Check for Updates</button>
+            <button class="btn btn-success" id="btn-auto-update" style="display:none;" onclick="triggerAutoUpdate()">Install Update</button>
             <div id="update-status" class="status-text" style="margin-top:12px;"></div>
         </div>
         <div class="card">
