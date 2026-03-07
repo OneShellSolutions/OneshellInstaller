@@ -142,6 +142,14 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosBackendService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellNATSService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMongoDBService.exe" uninstall'
+    ; Fallback: force-remove via sc delete (handles orphaned service registrations)
+    nsExec::ExecToLog 'sc delete OneShellMonitor'
+    nsExec::ExecToLog 'sc delete OneShellFrontend'
+    nsExec::ExecToLog 'sc delete OneShellPosPythonBackend'
+    nsExec::ExecToLog 'sc delete OneShellPosNodeBackend'
+    nsExec::ExecToLog 'sc delete OneShellPosBackend'
+    nsExec::ExecToLog 'sc delete OneShellNATS'
+    nsExec::ExecToLog 'sc delete OneShellMongoDB'
     Sleep 2000
 
     ; ======= Extract everything =======
@@ -430,7 +438,7 @@ Section "Uninstall"
     nsExec::ExecToLog 'taskkill /F /IM mongod.exe'
     Sleep 3000
 
-    ; Uninstall services
+    ; Uninstall services (WinSW first, then sc delete as fallback)
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellFrontendService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosPythonBackendService.exe" uninstall'
@@ -438,6 +446,15 @@ Section "Uninstall"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosBackendService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellNATSService.exe" uninstall'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMongoDBService.exe" uninstall'
+    Sleep 2000
+    ; Fallback: force-remove any leftover service registrations via sc delete
+    nsExec::ExecToLog 'sc delete OneShellMonitor'
+    nsExec::ExecToLog 'sc delete OneShellFrontend'
+    nsExec::ExecToLog 'sc delete OneShellPosPythonBackend'
+    nsExec::ExecToLog 'sc delete OneShellPosNodeBackend'
+    nsExec::ExecToLog 'sc delete OneShellPosBackend'
+    nsExec::ExecToLog 'sc delete OneShellNATS'
+    nsExec::ExecToLog 'sc delete OneShellMongoDB'
 
     ; Remove scheduled task
     nsExec::ExecToLog 'schtasks /Delete /TN "OneShellPOS-AutoUpdate" /F'
