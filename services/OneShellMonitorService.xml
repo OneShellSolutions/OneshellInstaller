@@ -11,6 +11,7 @@
     <pattern>yyyy-MM-dd</pattern>
     <autoRollAtTime>00:00:00</autoRollAtTime>
   </log>
+  <depend>OneShellMongoDB</depend>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
   <onfailure action="restart" delay="5 sec"/>

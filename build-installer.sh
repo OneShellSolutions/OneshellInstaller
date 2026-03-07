@@ -268,7 +268,7 @@ echo "       oneshell-commons installed to local Maven."
 clone_at_tag "PosClientBackend" "${REPOS_DIR}/PosClientBackend" "${POS_CLIENT_BACKEND_TAG}"
 echo "       Building PosClientBackend JAR..."
 (cd "${REPOS_DIR}/PosClientBackend" && ./mvnw clean package -DskipTests -q)
-JAR=$(find "${REPOS_DIR}/PosClientBackend/target" -name "*.jar" ! -name "*-sources*" ! -name "*-javadoc*" | head -1)
+JAR=$(find "${REPOS_DIR}/PosClientBackend/target" -maxdepth 1 -name "*.jar" ! -name "*-sources*" ! -name "*-javadoc*" ! -name "*-plain*" ! -name "*.original" | head -1)
 if [ -n "$JAR" ]; then
     cp "$JAR" "${BUNDLE_DIR}/apps/posbackend/posbackend.jar"
     echo "       PosClientBackend JAR ready."
@@ -282,12 +282,25 @@ fi
 # ============================================
 echo "[4/10] Preparing PosNodeBackend..."
 clone_at_tag "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend" "${POS_NODE_BACKEND_TAG}"
-echo "       Installing Node.js production dependencies..."
-(cd "${REPOS_DIR}/PosNodeBackend" && npm install --production --silent 2>/dev/null)
+echo "       Installing Node.js dependencies and building..."
+# Install deps (Babel is in dependencies, not devDeps)
+(cd "${REPOS_DIR}/PosNodeBackend" && npm install --silent 2>/dev/null)
+# Install Windows-specific native module prebuilds (sharp, canvas)
+echo "       Installing Windows-specific native binaries..."
+(cd "${REPOS_DIR}/PosNodeBackend" && npm install --no-save @img/sharp-win32-x64 2>/dev/null || true)
+(cd "${REPOS_DIR}/PosNodeBackend" && npx --yes node-pre-gyp install --target_platform=win32 --target_arch=x64 --directory node_modules/canvas 2>/dev/null || true)
+# Build: transpile src/ -> dist/ via Babel
+echo "       Transpiling PosNodeBackend..."
+(cd "${REPOS_DIR}/PosNodeBackend" && npm run build)
+# Verify build output exists
+if [ ! -f "${REPOS_DIR}/PosNodeBackend/dist/index.js" ]; then
+    echo "       ERROR: PosNodeBackend build failed - dist/index.js not found."
+    exit 1
+fi
 # Copy app files WITH node_modules (pre-installed), exclude dev stuff
-rsync -a --exclude='.git' --exclude='.env' --exclude='.github' \
+rsync -a --exclude='.git' --exclude='.env' --exclude='.github' --exclude='src' \
     "${REPOS_DIR}/PosNodeBackend/" "${BUNDLE_DIR}/apps/posNodeBackend/"
-echo "       PosNodeBackend ready (with node_modules)."
+echo "       PosNodeBackend ready (with node_modules and dist/)."
 
 # ============================================
 # Step 5: Clone & build PosFrontend (React)
@@ -297,7 +310,7 @@ clone_at_tag "PosFrontend" "${REPOS_DIR}/PosFrontend" "${POS_FRONTEND_TAG}"
 echo "       Installing frontend dependencies..."
 (cd "${REPOS_DIR}/PosFrontend" && npm install --silent 2>/dev/null)
 echo "       Building frontend..."
-(cd "${REPOS_DIR}/PosFrontend" && npm run build 2>/dev/null || true)
+(cd "${REPOS_DIR}/PosFrontend" && npm run build)
 
 # Find build output
 BUILD_DIR=""
@@ -400,27 +413,37 @@ max_payload: 100MB
 max_pending: 150MB
 
 websocket {
-  listen: "0.0.0.0:8080"
+  listen: "0.0.0.0:9080"
   no_tls: true
   compression: true
 }
 
 jetstream {
-  store_dir: "C:/Program Files/OneShellPOS/data/nats"
+  store_dir: "../data/nats"
 }
 NATS_EOF
 
 # Nginx config
 cat > "${BUNDLE_DIR}/config/nginx.conf" << 'NGINX_EOF'
 worker_processes  1;
+pid               logs/nginx.pid;
+error_log         ../logs/nginx/error.log;
+
 events { worker_connections  1024; }
 
 http {
-    include       mime.types;
+    include       conf/mime.types;
     default_type  application/octet-stream;
     sendfile      on;
     keepalive_timeout  65;
     client_max_body_size 100m;
+    access_log    ../logs/nginx/access.log;
+
+    client_body_temp_path temp/client_body_temp;
+    proxy_temp_path       temp/proxy_temp;
+    fastcgi_temp_path     temp/fastcgi_temp;
+    uwsgi_temp_path       temp/uwsgi_temp;
+    scgi_temp_path        temp/scgi_temp;
 
     server {
         listen       80;

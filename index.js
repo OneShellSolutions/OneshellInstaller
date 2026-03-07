@@ -288,7 +288,9 @@ app.post('/api/services/restart-all', (req, res) => {
     // Stop in reverse order
     const stopOrder = [...order].reverse();
     let stopCmd = stopOrder.map(s => `net stop "${s}"`).join(' & ');
-    let startCmd = order.map((s, i) => `timeout /t ${i * 2} /nobreak >nul & net start "${s}"`).join(' & ');
+    // Stagger startup: infra needs more time, app services less
+    const startDelays = { OneShellMongoDB: 0, OneShellNATS: 8, OneShellPosBackend: 12, OneShellPosNodeBackend: 20, OneShellPosPythonBackend: 20, OneShellFrontend: 20 };
+    let startCmd = order.map(s => `timeout /t ${startDelays[s] || 5} /nobreak >nul & net start "${s}"`).join(' & ');
 
     exec(stopCmd, () => {
         setTimeout(() => {
@@ -298,7 +300,7 @@ app.post('/api/services/restart-all', (req, res) => {
                     message: error ? 'Some services may have failed to start' : 'All services restarted.'
                 });
             });
-        }, 3000);
+        }, 5000);
     });
 });
 
@@ -451,7 +453,7 @@ function getDependencies(serviceId) {
     const deps = {
         'OneShellNATS': ['OneShellMongoDB'],
         'OneShellPosBackend': ['OneShellMongoDB', 'OneShellNATS'],
-        'OneShellPosNodeBackend': ['OneShellMongoDB'],
+        'OneShellPosNodeBackend': ['OneShellMongoDB', 'OneShellPosBackend'],
         'OneShellPosPythonBackend': ['OneShellPosBackend'],
         'OneShellFrontend': ['OneShellPosBackend']
     };

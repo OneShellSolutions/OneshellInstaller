@@ -3,7 +3,7 @@
   <name>OneShell POS Node Backend</name>
   <description>OneShell POS - Node.js Backend</description>
   <executable>%BASE%\..\node\node.exe</executable>
-  <arguments>"%BASE%\..\apps\posNodeBackend\server.js"</arguments>
+  <arguments>"%BASE%\..\apps\posNodeBackend\dist\index.js"</arguments>
   <workingdirectory>%BASE%\..\apps\posNodeBackend</workingdirectory>
   <env name="NODE_ENV" value="production"/>
   <logpath>%BASE%\..\logs\posNodeBackend</logpath>
@@ -15,6 +15,7 @@
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
   <depend>OneShellMongoDB</depend>
+  <depend>OneShellPosBackend</depend>
   <onfailure action="restart" delay="5 sec"/>
   <onfailure action="restart" delay="15 sec"/>
   <onfailure action="restart" delay="30 sec"/>

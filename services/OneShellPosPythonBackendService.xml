@@ -9,6 +9,7 @@
   <env name="OLLAMA_BASE_URL" value="https://ollama.com"/>
   <env name="OLLAMA_MODEL" value="qwen2.5:1.5b"/>
   <env name="OLLAMA_TIMEOUT" value="60"/>
+  <env name="PYTHONPATH" value="%BASE%\..\apps\PosPythonBackend"/>
   <logpath>%BASE%\..\logs\PosPythonBackend</logpath>
   <log mode="roll-by-size-time">
     <sizeThreshold>10240</sizeThreshold>

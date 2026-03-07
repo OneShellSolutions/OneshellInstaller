@@ -208,6 +208,14 @@ Section "Install"
     CreateDirectory "$INSTDIR\logs\PosPythonBackend"
     CreateDirectory "$INSTDIR\logs\nginx"
     CreateDirectory "$INSTDIR\logs\monitor"
+    ; Nginx needs these temp/log dirs (empty in distribution, NSIS File /r skips empty dirs)
+    CreateDirectory "$INSTDIR\nginx\logs"
+    CreateDirectory "$INSTDIR\nginx\temp"
+    CreateDirectory "$INSTDIR\nginx\temp\client_body_temp"
+    CreateDirectory "$INSTDIR\nginx\temp\proxy_temp"
+    CreateDirectory "$INSTDIR\nginx\temp\fastcgi_temp"
+    CreateDirectory "$INSTDIR\nginx\temp\uwsgi_temp"
+    CreateDirectory "$INSTDIR\nginx\temp\scgi_temp"
 
     ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
     DetailPrint "Installing Python dependencies (offline)..."
