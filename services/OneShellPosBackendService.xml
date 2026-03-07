@@ -3,7 +3,7 @@
   <name>OneShell POS Backend</name>
   <description>OneShell POS - Java Backend (Spring Boot)</description>
   <executable>%BASE%\..\jre\bin\java.exe</executable>
-  <arguments>-Xms3g -Xmx3.5g -DNATS_URL=nats://127.0.0.1:4222 -DNATS_REMOTE_URL=nats://178.156.139.110:4222 -DSPRING_PROFILES_ACTIVE=default -DMONGODB_URI=mongodb://127.0.0.1:27017/pos -DNODE_INVOICE_THEMES_URL=http://127.0.0.1:3001 -jar "%BASE%\..\apps\posbackend\posbackend.jar"</arguments>
+  <arguments>-Xms512m -Xmx2g -DNATS_URL=nats://127.0.0.1:4222 -DNATS_REMOTE_URL=nats://178.156.139.110:4222 -DSPRING_PROFILES_ACTIVE=default -DMONGODB_URI=mongodb://127.0.0.1:27017/pos -DNODE_INVOICE_THEMES_URL=http://127.0.0.1:3001 -jar "%BASE%\..\apps\posbackend\posbackend.jar"</arguments>
   <workingdirectory>%BASE%\..\apps\posbackend</workingdirectory>
   <logpath>%BASE%\..\logs\posbackend</logpath>
   <log mode="roll-by-size-time">
