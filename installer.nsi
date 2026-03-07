@@ -212,6 +212,7 @@ Section "Install"
     SetOutPath "$INSTDIR\config"
     File "${BUNDLE_DIR}/config/nats-server.conf"
     File "${BUNDLE_DIR}/config/nginx.conf"
+    File "${BUNDLE_DIR}/config/mime.types"
 
     ; ======= WinSW Service wrappers =======
     SetOutPath "$INSTDIR\services"
@@ -270,11 +271,18 @@ Section "Install"
 
     ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
     DetailPrint "Installing Python dependencies (offline)..."
-    IfFileExists "$INSTDIR\python\wheels\pip*" 0 +3
+    IfFileExists "$INSTDIR\python\wheels\pip*" 0 +5
         ; Install pip itself from bundled wheel (no internet needed)
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --no-index --find-links "$INSTDIR\python\wheels" --quiet'
+        DetailPrint "Installing pip from bundled wheels..."
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --no-index --find-links "$INSTDIR\python\wheels"'
         ; Install all app dependencies from bundled wheels (no internet needed)
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\python\wheels" -r "$INSTDIR\apps\PosPythonBackend\requirements.txt" --quiet'
+        DetailPrint "Installing Python app dependencies..."
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\python\wheels" -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
+    ; Fallback: try online install if wheels not bundled
+    IfFileExists "$INSTDIR\python\wheels\pip*" +4 0
+        DetailPrint "WARNING: No bundled wheels found. Trying online pip install..."
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py"'
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
 
     ; Node.js: node_modules pre-installed in bundle, nothing to do on customer machine
 
@@ -296,9 +304,11 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" install'
 
     ; ======= Install Visual C++ Redistributable (MongoDB 8.0 requires it) =======
-    IfFileExists "$INSTDIR\vc_redist.x64.exe" 0 +3
-    DetailPrint "Installing Visual C++ Redistributable..."
+    IfFileExists "$INSTDIR\vc_redist.x64.exe" 0 +4
+    DetailPrint "Installing Visual C++ Redistributable (required by MongoDB)..."
     nsExec::ExecToLog '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart'
+    Goto +2
+    DetailPrint "WARNING: vc_redist.x64.exe not found! MongoDB may fail to start."
 
     ; ======= Start services (dependency order with verification) =======
 

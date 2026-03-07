@@ -3,8 +3,8 @@
   <name>OneShell POS Frontend</name>
   <description>OneShell POS - Frontend Web Server (Nginx)</description>
   <executable>%BASE%\..\nginx\nginx.exe</executable>
-  <arguments>-p "%BASE%\..\nginx" -c "%BASE%\..\config\nginx.conf"</arguments>
-  <workingdirectory>%BASE%\..\nginx</workingdirectory>
+  <arguments>-p "%BASE%\.." -c "%BASE%\..\config\nginx.conf"</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
   <logpath>%BASE%\..\logs\nginx</logpath>
   <log mode="roll-by-size-time">
     <sizeThreshold>10240</sizeThreshold>

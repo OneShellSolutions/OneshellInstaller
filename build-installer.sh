@@ -206,8 +206,13 @@ download_cached "${PYTHON_PIP_URL}" "get-pip.py" "pip installer"
 download_cached "${MONGODB_URL}" "mongodb-${MONGODB_VERSION}.zip" "MongoDB ${MONGODB_VERSION}"
 download_cached "${NATS_URL}" "nats-${NATS_VERSION}.zip" "NATS ${NATS_VERSION}"
 download_cached "${NGINX_URL}" "nginx-${NGINX_VERSION}.zip" "Nginx ${NGINX_VERSION}"
-download_cached "${VCREDIST_URL}" "vc_redist.x64.exe" "Visual C++ Redistributable" || \
-    echo "       WARNING: Could not download Visual C++ Redistributable. MongoDB may fail on machines without it."
+download_cached "${VCREDIST_URL}" "vc_redist.x64.exe" "Visual C++ Redistributable"
+if [ ! -f "${CACHE_DIR}/vc_redist.x64.exe" ]; then
+    echo "       ERROR: Visual C++ Redistributable download failed. MongoDB 8.0 requires it."
+    echo "       Manual download: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    echo "       Place it at: ${CACHE_DIR}/vc_redist.x64.exe"
+    exit 1
+fi
 echo "       All runtimes ready."
 
 # ============================================
@@ -257,6 +262,14 @@ rm -rf "${CACHE_DIR}/nginx-extract"
 unzip -qo "${CACHE_DIR}/nginx-${NGINX_VERSION}.zip" -d "${CACHE_DIR}/nginx-extract"
 NGINX_DIR=$(find "${CACHE_DIR}/nginx-extract" -name "nginx.exe" -exec dirname {} \; | head -1)
 [ -n "$NGINX_DIR" ] && cp -r "$NGINX_DIR"/* "${BUNDLE_DIR}/nginx/"
+# Copy mime.types to config dir (nginx resolves includes relative to config file dir)
+NGINX_MIME=$(find "${BUNDLE_DIR}/nginx" -name "mime.types" | head -1)
+if [ -n "$NGINX_MIME" ]; then
+    cp "$NGINX_MIME" "${BUNDLE_DIR}/config/mime.types"
+    echo "       Copied mime.types to config dir."
+else
+    echo "       WARNING: mime.types not found in nginx distribution."
+fi
 rm -rf "${CACHE_DIR}/nginx-extract"
 
 echo "       Runtimes extracted."
@@ -308,6 +321,12 @@ fi
 # Copy app files WITH node_modules (pre-installed), exclude dev stuff
 rsync -a --exclude='.git' --exclude='.env' --exclude='.github' --exclude='src' \
     "${REPOS_DIR}/PosNodeBackend/" "${BUNDLE_DIR}/apps/posNodeBackend/"
+# Verify dist/index.js made it into the bundle
+if [ ! -f "${BUNDLE_DIR}/apps/posNodeBackend/dist/index.js" ]; then
+    echo "       ERROR: dist/index.js not found in bundle after rsync!"
+    echo "       Check that npm run build succeeded and rsync didn't skip dist/"
+    exit 1
+fi
 echo "       PosNodeBackend ready (with node_modules and dist/)."
 
 # ============================================
@@ -434,29 +453,29 @@ NATS_EOF
 # Nginx config
 cat > "${BUNDLE_DIR}/config/nginx.conf" << 'NGINX_EOF'
 worker_processes  1;
-pid               logs/nginx.pid;
-error_log         ../logs/nginx/error.log;
+pid               nginx/logs/nginx.pid;
+error_log         logs/nginx/error.log;
 
 events { worker_connections  1024; }
 
 http {
-    include       conf/mime.types;
+    include       config/mime.types;
     default_type  application/octet-stream;
     sendfile      on;
     keepalive_timeout  65;
     client_max_body_size 100m;
-    access_log    ../logs/nginx/access.log;
+    access_log    logs/nginx/access.log;
 
-    client_body_temp_path temp/client_body_temp;
-    proxy_temp_path       temp/proxy_temp;
-    fastcgi_temp_path     temp/fastcgi_temp;
-    uwsgi_temp_path       temp/uwsgi_temp;
-    scgi_temp_path        temp/scgi_temp;
+    client_body_temp_path nginx/temp/client_body_temp;
+    proxy_temp_path       nginx/temp/proxy_temp;
+    fastcgi_temp_path     nginx/temp/fastcgi_temp;
+    uwsgi_temp_path       nginx/temp/uwsgi_temp;
+    scgi_temp_path        nginx/temp/scgi_temp;
 
     server {
         listen       80;
         server_name  localhost;
-        root   "../apps/posFrontend";
+        root   "apps/posFrontend";
         index  index.html;
 
         location / { try_files $uri $uri/ /index.html; }
