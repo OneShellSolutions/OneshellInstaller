@@ -261,14 +261,38 @@ rm -rf "${CACHE_DIR}/nats-extract"
 rm -rf "${CACHE_DIR}/nginx-extract"
 unzip -qo "${CACHE_DIR}/nginx-${NGINX_VERSION}.zip" -d "${CACHE_DIR}/nginx-extract"
 NGINX_DIR=$(find "${CACHE_DIR}/nginx-extract" -name "nginx.exe" -exec dirname {} \; | head -1)
-[ -n "$NGINX_DIR" ] && cp -r "$NGINX_DIR"/* "${BUNDLE_DIR}/nginx/"
-# Copy mime.types to config dir (nginx resolves includes relative to config file dir)
-NGINX_MIME=$(find "${BUNDLE_DIR}/nginx" -name "mime.types" | head -1)
-if [ -n "$NGINX_MIME" ]; then
-    cp "$NGINX_MIME" "${BUNDLE_DIR}/config/mime.types"
+if [ -n "$NGINX_DIR" ]; then
+    cp -r "$NGINX_DIR"/* "${BUNDLE_DIR}/nginx/"
+    echo "       Nginx files:"
+    ls -la "${BUNDLE_DIR}/nginx/conf/" 2>/dev/null || echo "       (no conf/ dir)"
+fi
+# Copy mime.types to config dir (nginx resolves includes relative to prefix)
+if [ -f "${BUNDLE_DIR}/nginx/conf/mime.types" ]; then
+    cp "${BUNDLE_DIR}/nginx/conf/mime.types" "${BUNDLE_DIR}/config/mime.types"
     echo "       Copied mime.types to config dir."
+elif NGINX_MIME=$(find "${BUNDLE_DIR}/nginx" -name "mime.types" 2>/dev/null | head -1) && [ -n "$NGINX_MIME" ]; then
+    cp "$NGINX_MIME" "${BUNDLE_DIR}/config/mime.types"
+    echo "       Copied mime.types from $NGINX_MIME to config dir."
 else
-    echo "       WARNING: mime.types not found in nginx distribution."
+    echo "       WARNING: mime.types not found in nginx distribution. Creating default."
+    # Minimal mime.types so nginx can start
+    cat > "${BUNDLE_DIR}/config/mime.types" << 'MIME_EOF'
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    application/javascript                js;
+    application/json                      json;
+    image/png                             png;
+    image/jpeg                            jpeg jpg;
+    image/gif                             gif;
+    image/svg+xml                         svg svgz;
+    image/x-icon                          ico;
+    application/font-woff                 woff;
+    application/font-woff2                woff2;
+    application/octet-stream              bin exe dll;
+}
+MIME_EOF
 fi
 rm -rf "${CACHE_DIR}/nginx-extract"
 
