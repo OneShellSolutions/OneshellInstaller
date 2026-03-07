@@ -236,7 +236,7 @@ Section "Install"
 
     ; ======= Visual C++ Redistributable (required by MongoDB 8.0) =======
     SetOutPath "$INSTDIR"
-    File "${BUNDLE_DIR}/vc_redist.x64.exe"
+    File /nonfatal "${BUNDLE_DIR}/vc_redist.x64.exe"
 
     ; ======= Print utility =======
     SetOutPath "$INSTDIR"
@@ -296,6 +296,7 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" install'
 
     ; ======= Install Visual C++ Redistributable (MongoDB 8.0 requires it) =======
+    IfFileExists "$INSTDIR\vc_redist.x64.exe" 0 +3
     DetailPrint "Installing Visual C++ Redistributable..."
     nsExec::ExecToLog '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart'
 
