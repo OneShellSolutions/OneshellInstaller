@@ -406,13 +406,17 @@ cp -r "$SCRIPT_DIR/public/"* "${BUNDLE_DIR}/monitor/public/"
 # Step 8: Build Tray App (pkg → EXE)
 # ============================================
 echo "[8/10] Building Tray App..."
+# Always copy tray.js as fallback (node.exe can run it directly)
+cp "$SCRIPT_DIR/tray.js" "${BUNDLE_DIR}/tray/"
+# Try to build standalone EXE with pkg (optional - tray.js fallback works via node.exe)
 if command -v pkg &>/dev/null || npx pkg --version &>/dev/null 2>&1; then
-    (cd "$SCRIPT_DIR" && npx pkg -t node18-win-x64 -o "${BUNDLE_DIR}/tray/OneShellTray.exe" tray.js 2>/dev/null)
-    echo "       Tray EXE built."
+    (cd "$SCRIPT_DIR" && npx pkg -t node18-win-x64 -o "${BUNDLE_DIR}/tray/OneShellTray.exe" tray.js 2>/dev/null) && \
+        echo "       Tray EXE built." || \
+        echo "       WARNING: pkg build failed. Using tray.js with node.exe fallback."
 else
-    echo "       WARNING: pkg not available. Copying source file."
-    cp "$SCRIPT_DIR/tray.js" "${BUNDLE_DIR}/tray/"
+    echo "       INFO: pkg not available. Tray will run via node.exe tray.js"
 fi
+echo "       Tray app ready."
 
 # ============================================
 # Step 9: Assemble bundle

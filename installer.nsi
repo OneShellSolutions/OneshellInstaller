@@ -192,6 +192,15 @@ Section "Install"
     SetOutPath "$INSTDIR\tray"
     File /nonfatal "${BUNDLE_DIR}/tray/OneShellTray.exe"
     File /nonfatal "${BUNDLE_DIR}/tray/tray.js"
+    ; Create a launcher batch file (works whether pkg EXE exists or not)
+    FileOpen $0 "$INSTDIR\tray\launch-tray.bat" w
+    FileWrite $0 '@echo off$\r$\n'
+    FileWrite $0 'if exist "%~dp0OneShellTray.exe" ($\r$\n'
+    FileWrite $0 '    start "" "%~dp0OneShellTray.exe"$\r$\n'
+    FileWrite $0 ') else if exist "%~dp0tray.js" ($\r$\n'
+    FileWrite $0 '    start "" "%~dp0..\node\node.exe" "%~dp0tray.js"$\r$\n'
+    FileWrite $0 ')$\r$\n'
+    FileClose $0
 
     ; ======= Application artifacts =======
     DetailPrint "Installing POS applications..."
@@ -379,17 +388,16 @@ Section "Install"
     CreateShortcut "$SMPROGRAMS\OneShell POS\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\icon.ico" 0
 
     ; ======= Tray app auto-start on login =======
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray" '"$INSTDIR\tray\OneShellTray.exe"'
+    ; Create VBS launcher (no console window flash on login)
+    FileOpen $0 "$INSTDIR\tray\start-tray.vbs" w
+    FileWrite $0 'Set ws = CreateObject("WScript.Shell")$\r$\n'
+    FileWrite $0 'ws.Run Chr(34) & "$INSTDIR\tray\launch-tray.bat" & Chr(34), 0, False$\r$\n'
+    FileClose $0
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray" 'wscript.exe "$INSTDIR\tray\start-tray.vbs"'
 
-    ; Launch tray app (de-elevate for silent/service context)
-    IfSilent 0 +3
-    ; Silent mode: use cmd /c start to de-elevate from SYSTEM context
-    IfFileExists "$INSTDIR\tray\OneShellTray.exe" 0 +2
-    nsExec::Exec 'cmd /c start "" "$INSTDIR\tray\OneShellTray.exe"'
-    Goto +3
-    ; Interactive mode: launch directly and open browser
-    IfFileExists "$INSTDIR\tray\OneShellTray.exe" 0 +2
-    Exec '"$INSTDIR\tray\OneShellTray.exe"'
+    ; Launch tray app now
+    DetailPrint "Launching tray app..."
+    Exec '"$INSTDIR\tray\launch-tray.bat"'
     ExecShell "open" "http://localhost:3005"
 
     DetailPrint "OneShell POS installed successfully!"
