@@ -139,7 +139,7 @@ PYTHON_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 MONGODB_URL="https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-${MONGODB_VERSION}.zip"
 NATS_URL="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-windows-amd64.zip"
 NGINX_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.zip"
-VCREDIST_URL="https://download.visualstudio.microsoft.com/download/pr/eaab1f82-8d7a-4238-9e4c-58b0d19c0f53/vc_redist.x64.exe"
+VCREDIST_URL="https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 echo "============================================"
 echo " OneShell POS Installer Builder v${VERSION}"
@@ -183,6 +183,11 @@ clone_at_tag() {
     fi
 }
 
+# Configure git auth for private repos (CI passes GITHUB_TOKEN)
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+fi
+
 # Create directories
 mkdir -p "${CACHE_DIR}" "${REPOS_DIR}"
 rm -rf "${BUNDLE_DIR}"
@@ -202,7 +207,6 @@ download_cached "${MONGODB_URL}" "mongodb-${MONGODB_VERSION}.zip" "MongoDB ${MON
 download_cached "${NATS_URL}" "nats-${NATS_VERSION}.zip" "NATS ${NATS_VERSION}"
 download_cached "${NGINX_URL}" "nginx-${NGINX_VERSION}.zip" "Nginx ${NGINX_VERSION}"
 download_cached "${VCREDIST_URL}" "vc_redist.x64.exe" "Visual C++ Redistributable" || \
-    curl -fsSL -o "${CACHE_DIR}/vc_redist.x64.exe" "https://aka.ms/vs/17/release/vc_redist.x64.exe" 2>/dev/null || \
     echo "       WARNING: Could not download Visual C++ Redistributable. MongoDB may fail on machines without it."
 echo "       All runtimes ready."
 
