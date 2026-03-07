@@ -139,6 +139,7 @@ PYTHON_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 MONGODB_URL="https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-${MONGODB_VERSION}.zip"
 NATS_URL="https://github.com/nats-io/nats-server/releases/download/v${NATS_VERSION}/nats-server-v${NATS_VERSION}-windows-amd64.zip"
 NGINX_URL="https://nginx.org/download/nginx-${NGINX_VERSION}.zip"
+VCREDIST_URL="https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 echo "============================================"
 echo " OneShell POS Installer Builder v${VERSION}"
@@ -200,6 +201,7 @@ download_cached "${PYTHON_PIP_URL}" "get-pip.py" "pip installer"
 download_cached "${MONGODB_URL}" "mongodb-${MONGODB_VERSION}.zip" "MongoDB ${MONGODB_VERSION}"
 download_cached "${NATS_URL}" "nats-${NATS_VERSION}.zip" "NATS ${NATS_VERSION}"
 download_cached "${NGINX_URL}" "nginx-${NGINX_VERSION}.zip" "Nginx ${NGINX_VERSION}"
+download_cached "${VCREDIST_URL}" "vc_redist.x64.exe" "Visual C++ Redistributable"
 echo "       All runtimes ready."
 
 # ============================================
@@ -478,6 +480,9 @@ NGINX_EOF
 
 # Updater
 cp "$SCRIPT_DIR/updater/update-check.bat" "${BUNDLE_DIR}/updater/"
+
+# Visual C++ Redistributable (required by MongoDB 8.0)
+cp "${CACHE_DIR}/vc_redist.x64.exe" "${BUNDLE_DIR}/"
 
 # Print utility (optional - only if present in repo)
 [ -f "$SCRIPT_DIR/assets/oneshell-print-util-win.exe" ] && cp "$SCRIPT_DIR/assets/oneshell-print-util-win.exe" "${BUNDLE_DIR}/"

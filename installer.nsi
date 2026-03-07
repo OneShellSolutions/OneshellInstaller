@@ -230,6 +230,10 @@ Section "Install"
     SetOutPath "$INSTDIR\updater"
     File "${BUNDLE_DIR}/updater/update-check.bat"
 
+    ; ======= Visual C++ Redistributable (required by MongoDB 8.0) =======
+    SetOutPath "$INSTDIR"
+    File "${BUNDLE_DIR}/vc_redist.x64.exe"
+
     ; ======= Print utility =======
     SetOutPath "$INSTDIR"
     File /nonfatal "${BUNDLE_DIR}/oneshell-print-util-win.exe"
@@ -286,6 +290,10 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosPythonBackendService.exe" install'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellFrontendService.exe" install'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" install'
+
+    ; ======= Install Visual C++ Redistributable (MongoDB 8.0 requires it) =======
+    DetailPrint "Installing Visual C++ Redistributable..."
+    nsExec::ExecToLog '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart'
 
     ; ======= Start services (dependency order with verification) =======
 
@@ -440,6 +448,7 @@ Section "Uninstall"
     Delete "$INSTDIR\icon.ico"
     Delete "$INSTDIR\version.txt"
     Delete "$INSTDIR\*.bat"
+    Delete "$INSTDIR\vc_redist.x64.exe"
     Delete "$INSTDIR\*.exe"
     ; NOTE: $INSTDIR\data is preserved (MongoDB database)
     RMDir "$INSTDIR\mongodb"
