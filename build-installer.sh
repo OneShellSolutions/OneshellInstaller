@@ -337,12 +337,18 @@ fi
 echo "[4/10] Preparing PosNodeBackend..."
 clone_at_tag "PosNodeBackend" "${REPOS_DIR}/PosNodeBackend" "${POS_NODE_BACKEND_TAG}"
 echo "       Installing Node.js dependencies and building..."
-# Install deps (Babel is in dependencies, not devDeps)
+# Install deps with Windows target platform so native modules (sharp) get correct binaries
+echo "       Installing Node.js dependencies (targeting Windows x64)..."
 (cd "${REPOS_DIR}/PosNodeBackend" && npm install --silent 2>/dev/null)
-# Install Windows-specific native module prebuilds (sharp, canvas)
-echo "       Installing Windows-specific native binaries..."
-(cd "${REPOS_DIR}/PosNodeBackend" && npm install --no-save @img/sharp-win32-x64 2>/dev/null || true)
-(cd "${REPOS_DIR}/PosNodeBackend" && npx --yes node-pre-gyp install --target_platform=win32 --target_arch=x64 --directory node_modules/canvas 2>/dev/null || true)
+# Reinstall sharp specifically for Windows (cross-platform install)
+echo "       Installing sharp for Windows x64..."
+(cd "${REPOS_DIR}/PosNodeBackend" && npm install --os=win32 --cpu=x64 sharp 2>&1) || {
+    echo "       WARNING: sharp cross-install failed, trying @img/sharp-win32-x64..."
+    (cd "${REPOS_DIR}/PosNodeBackend" && npm install --no-save @img/sharp-win32-x64 2>/dev/null || true)
+}
+# Remove Linux-specific sharp binaries that won't work on Windows
+rm -rf "${REPOS_DIR}/PosNodeBackend/node_modules/@img/sharp-linux"* 2>/dev/null || true
+rm -rf "${REPOS_DIR}/PosNodeBackend/node_modules/@img/sharp-linuxmusl"* 2>/dev/null || true
 # Build: transpile src/ -> dist/ via Babel
 echo "       Transpiling PosNodeBackend..."
 (cd "${REPOS_DIR}/PosNodeBackend" && npm run build)
@@ -522,7 +528,7 @@ error_log         logs/nginx/error.log;
 events { worker_connections  1024; }
 
 http {
-    include       config/mime.types;
+    include       mime.types;
     default_type  application/octet-stream;
     sendfile      on;
     keepalive_timeout  65;
