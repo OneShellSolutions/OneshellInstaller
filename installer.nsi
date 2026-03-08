@@ -149,6 +149,20 @@ Section "Install"
     nsExec::ExecToLog 'sc delete OneShellMongoDB'
     Sleep 2000
 
+    ; ======= Clean old files before extracting (ensures stale files are removed on upgrade) =======
+    ; Only clean replaceable dirs - NEVER touch data\, logs\, or updater state files
+    DetailPrint "Cleaning old installation files..."
+    RMDir /r "$INSTDIR\jre"
+    RMDir /r "$INSTDIR\node"
+    RMDir /r "$INSTDIR\python"
+    RMDir /r "$INSTDIR\mongodb\bin"
+    RMDir /r "$INSTDIR\nats"
+    RMDir /r "$INSTDIR\nginx"
+    RMDir /r "$INSTDIR\monitor"
+    RMDir /r "$INSTDIR\apps"
+    RMDir /r "$INSTDIR\config"
+    RMDir /r "$INSTDIR\services"
+
     ; ======= Extract everything =======
     DetailPrint "Installing files..."
 
