@@ -64,6 +64,14 @@ C:\Program Files (x86)\OneShellPOS\
 - **Cause**: Babel transpile (`npm run build`) was not run during pipeline build
 - **Fix**: Pipeline must run `npm run build` which does `npx babel ./src -d ./dist`
 - **Check**: `Test-Path "C:\Program Files (x86)\OneShellPOS\apps\posNodeBackend\dist\index.js"`
+- **Installer safety net**: `installer.nsi` will attempt `npm install` + `npx babel` on target if dist/index.js is missing
+- **Manual fix on target**: `cd apps\posNodeBackend && ..\..\node\npm.cmd install && ..\..\node\npx.cmd babel src -d dist`
+
+### Python "No module named flask" (pip not bootstrapped)
+- **Cause**: Embeddable Python has NO pip by default; `get-pip.py` must be run first
+- **Fix**: Always run `get-pip.py` before `pip install`. Installer now does this automatically.
+- **Check**: `& "C:\Program Files (x86)\OneShellPOS\python\python.exe" -m pip --version`
+- **Manual fix**: `& "C:\Program Files (x86)\OneShellPOS\python\python.exe" "C:\Program Files (x86)\OneShellPOS\python\get-pip.py"` then `& "C:\Program Files (x86)\OneShellPOS\python\python.exe" -m pip install -r "C:\Program Files (x86)\OneShellPOS\apps\PosPythonBackend\requirements.txt"`
 
 ### Python "No module named encodings"
 - **Cause**: `python311._pth` file corrupted (controls sys.path in embeddable Python)
@@ -71,15 +79,18 @@ C:\Program Files (x86)\OneShellPOS\
   ```
   python311.zip
   .
+  Lib/site-packages
   ../apps/PosPythonBackend
   import site
   ```
+- `Lib/site-packages` is needed so pip-installed packages are found by the embeddable Python
 - **Check**: `Get-Content "C:\Program Files (x86)\OneShellPOS\python\python311._pth"`
 - Python embeddable IGNORES `PYTHONPATH` env var unless `import site` is in ._pth
 
 ### Nginx "rewrite or internal redirection cycle"
-- **Cause**: `root` path wrong in nginx.conf. Must be relative to nginx prefix (install dir)
-- **Fix**: `root "apps/posFrontend";` (NOT `../apps/posFrontend`)
+- **Cause**: `try_files $uri $uri/ /index.html` loops when index.html triggers the same location block
+- **Fix**: Use named location `@spa_fallback` with `rewrite ^ /index.html break;` to prevent cycle
+- **Root path**: Must be `root "apps/posFrontend";` (relative to nginx prefix, NOT `../apps/posFrontend`)
 - Nginx prefix set via `-p` flag in service XML = install dir
 
 ### Nginx temp dirs

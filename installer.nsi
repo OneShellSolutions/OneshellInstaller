@@ -269,26 +269,94 @@ Section "Install"
     CreateDirectory "$INSTDIR\temp\uwsgi_temp"
     CreateDirectory "$INSTDIR\temp\scgi_temp"
 
-    ; ======= Verify Python path file (._pth already configured by build script) =======
-    IfFileExists "$INSTDIR\python\python311._pth" 0 +2
-    DetailPrint "Python path file (python311._pth) present."
+    ; ======= Rewrite Python path file (MUST be done on target to guarantee correctness) =======
+    ; The embeddable Python's ._pth controls sys.path - if wrong, ALL imports fail
+    ; Rewrite entirely (never append) per CLAUDE.md known issues
+    DetailPrint "Configuring Python path file (python311._pth)..."
+    FileOpen $0 "$INSTDIR\python\python311._pth" w
+    FileWrite $0 "python311.zip$\r$\n"
+    FileWrite $0 ".$\r$\n"
+    FileWrite $0 "Lib/site-packages$\r$\n"
+    FileWrite $0 "../apps/PosPythonBackend$\r$\n"
+    FileWrite $0 "import site$\r$\n"
+    FileClose $0
+    DetailPrint "Python path file configured."
 
-    ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
-    DetailPrint "Installing Python dependencies (offline)..."
-    IfFileExists "$INSTDIR\python\wheels\pip*" 0 +5
-        ; Install pip itself from bundled wheel (no internet needed)
-        DetailPrint "Installing pip from bundled wheels..."
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --no-index --find-links "$INSTDIR\python\wheels"'
-        ; Install all app dependencies from bundled wheels (no internet needed)
+    ; ======= Install Python pip + deps =======
+    ; ALWAYS bootstrap pip first via get-pip.py (embeddable Python has no pip by default)
+    ; Then install app dependencies from bundled wheels (offline) or online as fallback
+    DetailPrint "Bootstrapping pip for embeddable Python..."
+    IfFileExists "$INSTDIR\python\get-pip.py" 0 pip_no_getpip
+        ; Try offline first (bundled wheels), then online fallback
+        IfFileExists "$INSTDIR\python\wheels\pip*" 0 pip_online_bootstrap
+            DetailPrint "Installing pip from bundled wheels (offline)..."
+            nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py" --no-index --find-links "$INSTDIR\python\wheels"'
+            Pop $1
+            StrCmp $1 "0" pip_bootstrapped pip_online_bootstrap
+        pip_online_bootstrap:
+            DetailPrint "Installing pip online (no bundled wheels or offline failed)..."
+            nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py"'
+            Pop $1
+        pip_bootstrapped:
+        ; Verify pip is now installed
+        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip --version'
+        Pop $1
+        StrCmp $1 "0" pip_install_deps 0
+            DetailPrint "ERROR: pip bootstrap failed! Python dependencies will NOT be installed."
+            DetailPrint "Manual fix: Run get-pip.py manually then pip install -r requirements.txt"
+            Goto pip_done
+        pip_install_deps:
+        ; Install app dependencies
         DetailPrint "Installing Python app dependencies..."
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\python\wheels" -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
-    ; Fallback: try online install if wheels not bundled
-    IfFileExists "$INSTDIR\python\wheels\pip*" +4 0
-        DetailPrint "WARNING: No bundled wheels found. Trying online pip install..."
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" "$INSTDIR\python\get-pip.py"'
-        nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
+        IfFileExists "$INSTDIR\python\wheels\*.whl" 0 pip_deps_online
+            ; Try offline from bundled wheels first
+            DetailPrint "Trying offline install from bundled wheels..."
+            nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\python\wheels" -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
+            Pop $1
+            StrCmp $1 "0" pip_deps_ok pip_deps_online
+        pip_deps_online:
+            ; Fallback: install from PyPI (requires internet)
+            DetailPrint "Installing Python dependencies online (offline install failed or no wheels)..."
+            nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install -r "$INSTDIR\apps\PosPythonBackend\requirements.txt"'
+            Pop $1
+            StrCmp $1 "0" pip_deps_ok 0
+                DetailPrint "ERROR: Python dependency install failed! PosPythonBackend will not start."
+                DetailPrint "Manual fix: python -m pip install -r requirements.txt"
+        pip_deps_ok:
+        DetailPrint "Python dependencies installed successfully."
+        Goto pip_done
+    pip_no_getpip:
+        DetailPrint "ERROR: get-pip.py not found! Cannot bootstrap pip."
+        DetailPrint "Manual fix: Download https://bootstrap.pypa.io/get-pip.py to python\ folder"
+    pip_done:
 
-    ; Node.js: node_modules pre-installed in bundle, nothing to do on customer machine
+    ; ======= Node.js: Verify dist/index.js or build on target as fallback =======
+    ; The build pipeline should have run babel, but if it failed, try building here
+    IfFileExists "$INSTDIR\apps\posNodeBackend\dist\index.js" node_ok 0
+        DetailPrint "WARNING: posNodeBackend/dist/index.js not found! Attempting on-target build..."
+        ; Check if source and babel config exist for an on-target build
+        IfFileExists "$INSTDIR\apps\posNodeBackend\src\index.js" 0 node_no_source
+        IfFileExists "$INSTDIR\apps\posNodeBackend\babel.config.json" 0 node_no_source
+            ; Ensure node_modules are installed (babel is a dependency)
+            DetailPrint "Running npm install for PosNodeBackend..."
+            nsExec::ExecToLog '"$INSTDIR\node\npm.cmd" install --prefix "$INSTDIR\apps\posNodeBackend"'
+            Pop $1
+            ; Run babel transpile: src/ -> dist/
+            DetailPrint "Running babel transpile (src -> dist)..."
+            nsExec::ExecToLog '"$INSTDIR\node\npx.cmd" --prefix "$INSTDIR\apps\posNodeBackend" babel "$INSTDIR\apps\posNodeBackend\src" -d "$INSTDIR\apps\posNodeBackend\dist"'
+            Pop $1
+            ; Verify it worked
+            IfFileExists "$INSTDIR\apps\posNodeBackend\dist\index.js" node_build_ok 0
+                DetailPrint "ERROR: On-target babel build failed! PosNodeBackend will not start."
+                DetailPrint "Manual fix: cd apps\posNodeBackend && npm install && npx babel src -d dist"
+                Goto node_ok
+            node_build_ok:
+                DetailPrint "PosNodeBackend on-target build succeeded."
+                Goto node_ok
+        node_no_source:
+            DetailPrint "ERROR: posNodeBackend/src/index.js or babel.config.json not found!"
+            DetailPrint "Cannot build on target. PosNodeBackend will fail to start."
+    node_ok:
 
     ; ======= Version file =======
     SetOutPath "$INSTDIR"
@@ -304,10 +372,22 @@ Section "Install"
     ; Use ExecWait to guarantee DLLs are fully registered before proceeding
     ExecWait '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
     DetailPrint "Visual C++ Redistributable exit code: $0"
+    ; Verify DLLs are actually present after install (exit code alone can be misleading)
+    IfFileExists "$SYSDIR\vcruntime140.dll" vc_verified 0
+        DetailPrint "WARNING: vcruntime140.dll not found after VC++ install! MongoDB may fail."
+        DetailPrint "Try manually running: $INSTDIR\vc_redist.x64.exe"
+    vc_verified:
+    DetailPrint "Visual C++ Runtime DLLs verified."
     Goto vc_done
     vc_not_found:
-    DetailPrint "ERROR: vc_redist.x64.exe not found! MongoDB 8.0 will NOT start without it."
-    DetailPrint "Download from: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    ; Check if VC++ is already installed from a previous installation
+    IfFileExists "$SYSDIR\vcruntime140.dll" vc_already_installed 0
+        DetailPrint "ERROR: vc_redist.x64.exe not found AND VC++ Runtime not installed!"
+        DetailPrint "MongoDB 8.0 will NOT start without it."
+        DetailPrint "Download from: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        Goto vc_done
+    vc_already_installed:
+        DetailPrint "vc_redist.x64.exe not in bundle, but VC++ Runtime already installed. OK."
     vc_done:
 
     ; ======= Register Windows Services =======

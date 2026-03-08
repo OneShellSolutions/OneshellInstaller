@@ -12,10 +12,18 @@
     <autoRollAtTime>00:00:00</autoRollAtTime>
     <keepFiles>5</keepFiles>
   </log>
+  <!-- Ensure VC++ Runtime DLLs can be found by mongod.exe -->
+  <env name="PATH" value="%SystemRoot%\System32;%SystemRoot%;%BASE%\..\mongodb\bin"/>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
+  <!-- More restart attempts: 5 retries with increasing delays -->
   <onfailure action="restart" delay="10 sec"/>
   <onfailure action="restart" delay="30 sec"/>
   <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
+  <onfailure action="restart" delay="300 sec"/>
   <resetfailure>1 hour</resetfailure>
+  <!-- Pre-start: clear stale mongod.lock to prevent startup failures after crash -->
+  <prestartexecutable>powershell.exe</prestartexecutable>
+  <prestartarguments>-NoProfile -Command "if (Test-Path '%BASE%\..\data\mongodb\mongod.lock') { Set-Content '%BASE%\..\data\mongodb\mongod.lock' '' }"</prestartarguments>
 </service>

@@ -5,11 +5,15 @@
   <executable>%BASE%\..\python\python.exe</executable>
   <arguments>"%BASE%\..\apps\PosPythonBackend\main.py"</arguments>
   <workingdirectory>%BASE%\..\apps\PosPythonBackend</workingdirectory>
+  <env name="PORT" value="5200"/>
   <env name="POS_CLIENT_BACKEND_URL" value="http://127.0.0.1:8090"/>
+  <env name="MONGODB_URI" value="mongodb://127.0.0.1:27017/pos"/>
+  <env name="NATS_URL" value="nats://127.0.0.1:4222"/>
   <env name="OLLAMA_BASE_URL" value="https://ollama.com"/>
   <env name="OLLAMA_MODEL" value="qwen2.5:1.5b"/>
   <env name="OLLAMA_TIMEOUT" value="60"/>
   <env name="PYTHONPATH" value="%BASE%\..\apps\PosPythonBackend"/>
+  <env name="PYTHONDONTWRITEBYTECODE" value="1"/>
   <logpath>%BASE%\..\logs\PosPythonBackend</logpath>
   <log mode="roll-by-size-time">
     <sizeThreshold>10240</sizeThreshold>

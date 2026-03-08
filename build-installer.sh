@@ -244,6 +244,7 @@ if [ -f "$PTH_FILE" ]; then
     cat > "$PTH_FILE" << 'PTH_EOF'
 python311.zip
 .
+Lib/site-packages
 ../apps/PosPythonBackend
 import site
 PTH_EOF
@@ -400,21 +401,59 @@ echo "       Downloading Python wheels for offline install..."
 mkdir -p "${CACHE_DIR}/python-wheels" "${BUNDLE_DIR}/python/wheels"
 if [ -f "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" ]; then
     # Download pip + setuptools wheels (needed for get-pip.py offline)
-    pip download pip setuptools \
+    echo "       Downloading pip/setuptools wheels..."
+    pip download pip setuptools wheel \
         --dest "${CACHE_DIR}/python-wheels" \
         --platform win_amd64 --python-version 3.11 --only-binary=:all: 2>/dev/null || \
-    pip download pip setuptools \
+    pip download pip setuptools wheel \
         --dest "${CACHE_DIR}/python-wheels" 2>/dev/null || true
 
     # Download all dependency wheels for Windows
+    echo "       Downloading app dependency wheels..."
+    # First try: platform-specific Windows wheels only
     pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
         --dest "${CACHE_DIR}/python-wheels" \
         --platform win_amd64 --python-version 3.11 --only-binary=:all: 2>/dev/null || \
+    # Second try: allow platform-specific + pure Python wheels (no source dists)
+    pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
+        --dest "${CACHE_DIR}/python-wheels" \
+        --platform win_amd64 --python-version 3.11 --no-deps 2>/dev/null; \
+    pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
+        --dest "${CACHE_DIR}/python-wheels" \
+        --only-binary=:all: 2>/dev/null || \
+    # Last resort: download anything available (may include source dists)
     pip download -r "${BUNDLE_DIR}/apps/PosPythonBackend/requirements.txt" \
         --dest "${CACHE_DIR}/python-wheels" 2>/dev/null || true
 
     cp "${CACHE_DIR}/python-wheels/"* "${BUNDLE_DIR}/python/wheels/" 2>/dev/null || true
+
+    # ---- Verify critical wheels are present ----
+    WHEEL_COUNT=$(ls -1 "${BUNDLE_DIR}/python/wheels/"*.whl 2>/dev/null | wc -l)
+    PIP_WHEEL=$(ls -1 "${BUNDLE_DIR}/python/wheels/pip"*.whl 2>/dev/null | head -1)
+    FLASK_WHEEL=$(ls -1 "${BUNDLE_DIR}/python/wheels/"[Ff]lask*.whl 2>/dev/null | head -1)
+    echo "       Wheels bundled: ${WHEEL_COUNT} files"
+    if [ -z "$PIP_WHEEL" ]; then
+        echo "       WARNING: pip wheel not found in bundle! Offline pip bootstrap will fail."
+        echo "       The installer will fall back to online get-pip.py (requires internet on target)."
+    fi
+    if [ -z "$FLASK_WHEEL" ]; then
+        echo "       WARNING: Flask wheel not found in bundle! PosPythonBackend offline install may fail."
+        echo "       The installer will fall back to online pip install (requires internet on target)."
+    fi
     echo "       Python wheels ready for offline install."
+else
+    echo "       WARNING: requirements.txt not found! Skipping wheel download."
+    echo "       PosPythonBackend will need online pip install on target machine."
+fi
+
+# Verify get-pip.py is in the bundle (critical for pip bootstrapping)
+if [ ! -f "${BUNDLE_DIR}/python/get-pip.py" ]; then
+    echo "       ERROR: get-pip.py not found in bundle! Downloading..."
+    curl -fsSL -o "${BUNDLE_DIR}/python/get-pip.py" "https://bootstrap.pypa.io/get-pip.py"
+    if [ ! -f "${BUNDLE_DIR}/python/get-pip.py" ]; then
+        echo "       CRITICAL: Failed to download get-pip.py. pip cannot be bootstrapped on target!"
+        exit 1
+    fi
 fi
 echo "       PosPythonBackend ready."
 
@@ -500,7 +539,15 @@ http {
         root   "apps/posFrontend";
         index  index.html;
 
-        location / { try_files $uri $uri/ /index.html; }
+        # SPA routing: serve file if exists, otherwise fall back to index.html
+        # Uses named location to prevent infinite redirect loop if index.html is missing
+        location / {
+            try_files $uri $uri/ @spa_fallback;
+        }
+
+        location @spa_fallback {
+            rewrite ^ /index.html break;
+        }
 
         location /pos/ {
             proxy_pass http://127.0.0.1:8090;
