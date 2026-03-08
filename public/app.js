@@ -183,13 +183,46 @@ async function selectService(id) {
 // ================================================
 async function loadSystemInfo() {
     try {
-        const res = await fetch('/api/system');
-        const data = await res.json();
+        const [sysRes, procRes] = await Promise.all([
+            fetch('/api/system'),
+            fetch('/api/system/processes')
+        ]);
+        const data = await sysRes.json();
+        const procData = await procRes.json();
         if (!data.success) return;
 
         const sys = data.system;
         const memPct = parseFloat(sys.memoryPercent);
         const memColor = memPct > 90 ? 'fill-red' : memPct > 70 ? 'fill-yellow' : 'fill-green';
+
+        const totalMemGB = parseFloat(sys.totalMemory);
+        const oneshellMemMB = procData.totalMemoryMB || 0;
+        const oneshellMemGB = (oneshellMemMB / 1024).toFixed(1);
+        const oneshellMemPct = totalMemGB > 0 ? ((oneshellMemMB / 1024 / totalMemGB) * 100).toFixed(1) : 0;
+        const oneshellMemColor = oneshellMemPct > 80 ? 'fill-red' : oneshellMemPct > 50 ? 'fill-yellow' : 'fill-green';
+
+        // Per-service resource rows
+        let serviceRows = '';
+        if (procData.services && procData.services.length > 0) {
+            serviceRows = procData.services
+                .filter(s => s.serviceId !== 'OneShellMonitor')
+                .map(s => {
+                    const memPctSvc = totalMemGB > 0 ? ((s.memoryMB / 1024 / totalMemGB) * 100).toFixed(1) : 0;
+                    const memBarColor = memPctSvc > 20 ? 'fill-red' : memPctSvc > 10 ? 'fill-yellow' : 'fill-green';
+                    return `
+                        <tr>
+                            <td>
+                                <span class="status-dot ${s.running || s.memoryMB > 0 ? 'running' : 'stopped'}" style="width:8px;height:8px;vertical-align:middle;margin-right:6px;"></span>
+                                ${s.processName}
+                            </td>
+                            <td>${s.pid || '-'}</td>
+                            <td>${s.memoryMB > 0 ? s.memoryMB + ' MB' : '-'}</td>
+                            <td style="width:120px;">
+                                <div class="progress-bar" style="margin:0;"><div class="fill ${memBarColor}" style="width:${Math.min(memPctSvc * 3, 100)}%"></div></div>
+                            </td>
+                        </tr>`;
+                }).join('');
+        }
 
         document.getElementById('system-info').innerHTML = `
             <div class="system-card">
@@ -208,10 +241,31 @@ async function loadSystemInfo() {
                 <div class="sub">Load: ${sys.cpuLoad}</div>
             </div>
             <div class="system-card">
-                <h3>Memory</h3>
+                <h3>System Memory</h3>
                 <div class="value">${sys.usedMemory} / ${sys.totalMemory}</div>
                 <div class="sub">${sys.memoryPercent}% used</div>
                 <div class="progress-bar"><div class="fill ${memColor}" style="width:${sys.memoryPercent}%"></div></div>
+            </div>
+            <div class="system-card" style="grid-column: 1 / -1;">
+                <h3>OneShell POS Resource Usage</h3>
+                <div style="display:flex;gap:24px;margin-bottom:16px;">
+                    <div>
+                        <div class="value">${oneshellMemGB} GB</div>
+                        <div class="sub">Memory (${oneshellMemPct}% of total)</div>
+                        <div class="progress-bar" style="width:200px;"><div class="fill ${oneshellMemColor}" style="width:${oneshellMemPct}%"></div></div>
+                    </div>
+                </div>
+                <table class="versions-table" style="margin-top:0;">
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>PID</th>
+                            <th>Memory</th>
+                            <th>Usage</th>
+                        </tr>
+                    </thead>
+                    <tbody>${serviceRows || '<tr><td colspan="4" style="color:#636c76;">No process data available</td></tr>'}</tbody>
+                </table>
             </div>
         `;
     } catch (e) {

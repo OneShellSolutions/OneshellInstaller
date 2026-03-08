@@ -1,5 +1,5 @@
 {
-  "installer": "1.0.22",
+  "installer": "1.0.23",
 
   "runtimes": {
     "jre": "24+36",

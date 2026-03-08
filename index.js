@@ -394,6 +394,120 @@ app.get('/api/system', (req, res) => {
     });
 });
 
+// --- Per-service resource usage ---
+// Process name patterns for each service
+const SERVICE_PROCESS_MAP = {
+    'OneShellMongoDB': { name: 'mongod', match: 'mongod' },
+    'OneShellNATS': { name: 'nats-server', match: 'nats-server' },
+    'OneShellPosBackend': { name: 'java (PosBackend)', match: 'posbackend' },
+    'OneShellPosNodeBackend': { name: 'node (NodeBackend)', match: 'posNodeBackend' },
+    'OneShellPosPythonBackend': { name: 'python (PythonBackend)', match: 'PosPythonBackend' },
+    'OneShellFrontend': { name: 'nginx', match: 'nginx' },
+    'OneShellMonitor': { name: 'OneShellMonitor', match: 'OneShellMonitor' }
+};
+
+function getServiceProcessStats() {
+    if (DEV_MODE) {
+        // Mock data for dev mode
+        const mockStats = SERVICES.map(svc => {
+            const running = mockServiceState[svc.serviceId] === 'RUNNING';
+            return {
+                serviceId: svc.serviceId,
+                name: svc.name,
+                processName: SERVICE_PROCESS_MAP[svc.serviceId]?.name || svc.serviceId,
+                running,
+                cpuPercent: running ? +(Math.random() * 15).toFixed(1) : 0,
+                memoryMB: running ? +(50 + Math.random() * 400).toFixed(0) : 0,
+                pid: running ? Math.floor(1000 + Math.random() * 9000) : null
+            };
+        });
+        const totalCpu = mockStats.reduce((sum, s) => sum + s.cpuPercent, 0);
+        const totalMemMB = mockStats.reduce((sum, s) => sum + s.memoryMB, 0);
+        return Promise.resolve({ services: mockStats, totalCpuPercent: +totalCpu.toFixed(1), totalMemoryMB: +totalMemMB });
+    }
+
+    return new Promise((resolve) => {
+        // PowerShell script to get CPU and memory for each OneShell process
+        const psScript = `
+$cpuCores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+$procs = @()
+$patterns = @{
+    'OneShellMongoDB' = 'mongod'
+    'OneShellNATS' = 'nats-server'
+    'OneShellPosBackend' = 'posbackend'
+    'OneShellPosNodeBackend' = 'posNodeBackend'
+    'OneShellPosPythonBackend' = 'PosPythonBackend'
+    'OneShellFrontend' = 'nginx'
+    'OneShellMonitor' = 'OneShellMonitor'
+}
+foreach ($svcId in $patterns.Keys) {
+    $pattern = $patterns[$svcId]
+    $matched = Get-Process | Where-Object {
+        $_.ProcessName -like "*$pattern*" -or ($_.CommandLine -and $_.CommandLine -like "*$pattern*")
+    } -ErrorAction SilentlyContinue
+    if (-not $matched) {
+        $matched = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$pattern*" } -ErrorAction SilentlyContinue
+        if ($matched) {
+            $pids = $matched | ForEach-Object { $_.ProcessId }
+            $matched = Get-Process -Id $pids -ErrorAction SilentlyContinue
+        }
+    }
+    $cpuTotal = 0
+    $memTotal = 0
+    $pidVal = $null
+    if ($matched) {
+        foreach ($p in $matched) {
+            $cpuTotal += $p.CPU
+            $memTotal += $p.WorkingSet64
+            if (-not $pidVal) { $pidVal = $p.Id }
+        }
+    }
+    $procs += [PSCustomObject]@{
+        serviceId = $svcId
+        pid = $pidVal
+        cpuSeconds = [math]::Round($cpuTotal, 2)
+        memoryMB = [math]::Round($memTotal / 1MB, 0)
+    }
+}
+$procs | ConvertTo-Json -Compress
+`.replace(/\n/g, ' ');
+
+        exec(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"')}"`, { timeout: 10000 }, (error, stdout) => {
+            if (error) {
+                resolve({ services: [], totalCpuPercent: 0, totalMemoryMB: 0, error: error.message });
+                return;
+            }
+            try {
+                let procData = JSON.parse(stdout.trim());
+                if (!Array.isArray(procData)) procData = [procData];
+
+                const results = SERVICES.map(svc => {
+                    const proc = procData.find(p => p.serviceId === svc.serviceId) || {};
+                    return {
+                        serviceId: svc.serviceId,
+                        name: svc.name,
+                        processName: SERVICE_PROCESS_MAP[svc.serviceId]?.name || svc.serviceId,
+                        running: (proc.memoryMB || 0) > 0,
+                        cpuSeconds: proc.cpuSeconds || 0,
+                        memoryMB: proc.memoryMB || 0,
+                        pid: proc.pid || null
+                    };
+                });
+
+                const totalMemMB = results.reduce((sum, s) => sum + s.memoryMB, 0);
+                resolve({ services: results, totalMemoryMB: totalMemMB });
+            } catch (e) {
+                resolve({ services: [], totalCpuPercent: 0, totalMemoryMB: 0, error: 'Parse error: ' + e.message });
+            }
+        });
+    });
+}
+
+app.get('/api/system/processes', async (req, res) => {
+    const stats = await getServiceProcessStats();
+    res.json({ success: true, ...stats });
+});
+
 // --- Get manifest (installed versions) ---
 app.get('/api/manifest', (req, res) => {
     const installerVersion = fs.existsSync(VERSION_FILE)
