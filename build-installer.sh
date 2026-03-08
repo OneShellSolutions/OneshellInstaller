@@ -352,7 +352,9 @@ if [ ! -f "${REPOS_DIR}/PosNodeBackend/dist/index.js" ]; then
     exit 1
 fi
 # Copy app files WITH node_modules (pre-installed), exclude dev stuff
-rsync -a --exclude='.git' --exclude='.env' --exclude='.github' --exclude='src' \
+# IMPORTANT: Use /src (leading slash) to only exclude top-level src/ directory
+# Without the slash, rsync excludes ALL 'src' dirs including node_modules/debug/src/
+rsync -a --exclude='.git' --exclude='.env' --exclude='.github' --exclude='/src' \
     "${REPOS_DIR}/PosNodeBackend/" "${BUNDLE_DIR}/apps/posNodeBackend/"
 # Verify dist/index.js made it into the bundle
 if [ ! -f "${BUNDLE_DIR}/apps/posNodeBackend/dist/index.js" ]; then

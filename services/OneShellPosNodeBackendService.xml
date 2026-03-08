@@ -24,5 +24,7 @@
   <onfailure action="restart" delay="5 sec"/>
   <onfailure action="restart" delay="15 sec"/>
   <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <onfailure action="restart" delay="120 sec"/>
   <resetfailure>1 hour</resetfailure>
 </service>

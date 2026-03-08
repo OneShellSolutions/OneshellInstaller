@@ -337,18 +337,15 @@ Section "Install"
         ; Check if source and babel config exist for an on-target build
         IfFileExists "$INSTDIR\apps\posNodeBackend\src\index.js" 0 node_no_source
         IfFileExists "$INSTDIR\apps\posNodeBackend\babel.config.json" 0 node_no_source
-            ; Ensure node_modules are installed (babel is a dependency)
-            DetailPrint "Running npm install for PosNodeBackend..."
-            nsExec::ExecToLog '"$INSTDIR\node\npm.cmd" install --prefix "$INSTDIR\apps\posNodeBackend"'
-            Pop $1
-            ; Run babel transpile: src/ -> dist/
-            DetailPrint "Running babel transpile (src -> dist)..."
-            nsExec::ExecToLog '"$INSTDIR\node\npx.cmd" --prefix "$INSTDIR\apps\posNodeBackend" babel "$INSTDIR\apps\posNodeBackend\src" -d "$INSTDIR\apps\posNodeBackend\dist"'
+            ; Add node to PATH so npm/npx can find it
+            ; Use PowerShell to run npm install + babel in the correct working directory
+            DetailPrint "Running npm install + babel build for PosNodeBackend..."
+            nsExec::ExecToLog 'powershell -NoProfile -Command "$env:PATH = \"$INSTDIR\node;\" + $env:PATH; Set-Location \"$INSTDIR\apps\posNodeBackend\"; & \"$INSTDIR\node\npm.cmd\" install 2>&1 | Out-String; & \"$INSTDIR\node\npx.cmd\" babel src -d dist 2>&1 | Out-String"'
             Pop $1
             ; Verify it worked
             IfFileExists "$INSTDIR\apps\posNodeBackend\dist\index.js" node_build_ok 0
                 DetailPrint "ERROR: On-target babel build failed! PosNodeBackend will not start."
-                DetailPrint "Manual fix: cd apps\posNodeBackend && npm install && npx babel src -d dist"
+                DetailPrint "Manual fix: cd apps\posNodeBackend && ..\..\node\npm.cmd install && ..\..\node\npx.cmd babel src -d dist"
                 Goto node_ok
             node_build_ok:
                 DetailPrint "PosNodeBackend on-target build succeeded."
