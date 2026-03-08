@@ -10,6 +10,7 @@
     <sizeThreshold>10240</sizeThreshold>
     <pattern>yyyy-MM-dd</pattern>
     <autoRollAtTime>00:00:00</autoRollAtTime>
+    <keepFiles>5</keepFiles>
   </log>
   <depend>OneShellMongoDB</depend>
   <startmode>Automatic</startmode>

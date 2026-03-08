@@ -7,7 +7,7 @@ set -euo pipefail
 # This script:
 #   1. Downloads all runtimes (JRE 24, Node 20, Python 3.11, MongoDB 8, NATS, Nginx)
 #   2. Clones & builds each app repo at specified tags from GitHub
-#   3. Packages the monitoring dashboard + tray icon via `pkg`
+#   3. Packages the monitoring dashboard via `pkg`
 #   4. Assembles everything into an NSIS installer (.exe)
 #
 # Prerequisites:
@@ -191,7 +191,7 @@ fi
 # Create directories
 mkdir -p "${CACHE_DIR}" "${REPOS_DIR}"
 rm -rf "${BUNDLE_DIR}"
-mkdir -p "${BUNDLE_DIR}"/{jre,node,python,mongodb/bin,nats,nginx,monitor/public,tray,services,config,updater}
+mkdir -p "${BUNDLE_DIR}"/{jre,node,python,mongodb/bin,nats,nginx,monitor/public,services,config,updater}
 mkdir -p "${BUNDLE_DIR}"/apps/{posbackend,posNodeBackend,posFrontend,PosPythonBackend}
 
 # ============================================
@@ -240,7 +240,15 @@ cp -r "${CACHE_DIR}/python-extract/"* "${BUNDLE_DIR}/python/"
 cp "${CACHE_DIR}/get-pip.py" "${BUNDLE_DIR}/python/"
 # Enable pip: uncomment "import site" in ._pth file
 PTH=$(ls "${BUNDLE_DIR}/python/"python*._pth 2>/dev/null | head -1)
-[ -n "$PTH" ] && sed -i.bak 's/#import site/import site/' "$PTH" && rm -f "${PTH}.bak"
+if [ -n "$PTH" ]; then
+    sed -i.bak 's/#import site/import site/' "$PTH" && rm -f "${PTH}.bak"
+    # Add PosPythonBackend to sys.path (Python embeddable ignores PYTHONPATH)
+    if ! grep -q "PosPythonBackend" "$PTH" 2>/dev/null; then
+        echo "" >> "$PTH"
+        echo "../apps/PosPythonBackend" >> "$PTH"
+        echo "       Added PosPythonBackend to $(basename $PTH)"
+    fi
+fi
 rm -rf "${CACHE_DIR}/python-extract"
 
 # MongoDB
@@ -426,21 +434,7 @@ else
 fi
 cp -r "$SCRIPT_DIR/public/"* "${BUNDLE_DIR}/monitor/public/"
 
-# ============================================
-# Step 8: Build Tray App (pkg → EXE)
-# ============================================
-echo "[8/10] Building Tray App..."
-# Always copy tray.js as fallback (node.exe can run it directly)
-cp "$SCRIPT_DIR/tray.js" "${BUNDLE_DIR}/tray/"
-# Try to build standalone EXE with pkg (optional - tray.js fallback works via node.exe)
-if command -v pkg &>/dev/null || npx pkg --version &>/dev/null 2>&1; then
-    (cd "$SCRIPT_DIR" && npx pkg -t node18-win-x64 -o "${BUNDLE_DIR}/tray/OneShellTray.exe" tray.js 2>/dev/null) && \
-        echo "       Tray EXE built." || \
-        echo "       WARNING: pkg build failed. Using tray.js with node.exe fallback."
-else
-    echo "       INFO: pkg not available. Tray will run via node.exe tray.js"
-fi
-echo "       Tray app ready."
+# Step 8: (removed - tray app no longer bundled)
 
 # ============================================
 # Step 9: Assemble bundle
@@ -474,7 +468,7 @@ websocket {
 }
 
 jetstream {
-  store_dir: "../data/nats"
+  store_dir: "data/nats"
 }
 NATS_EOF
 
@@ -494,11 +488,11 @@ http {
     client_max_body_size 100m;
     access_log    logs/nginx/access.log;
 
-    client_body_temp_path nginx/temp/client_body_temp;
-    proxy_temp_path       nginx/temp/proxy_temp;
-    fastcgi_temp_path     nginx/temp/fastcgi_temp;
-    uwsgi_temp_path       nginx/temp/uwsgi_temp;
-    scgi_temp_path        nginx/temp/scgi_temp;
+    client_body_temp_path temp/client_body_temp;
+    proxy_temp_path       temp/proxy_temp;
+    fastcgi_temp_path     temp/fastcgi_temp;
+    uwsgi_temp_path       temp/uwsgi_temp;
+    scgi_temp_path        temp/scgi_temp;
 
     server {
         listen       80;

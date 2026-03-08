@@ -17,6 +17,28 @@ const SERVICES_DIR = path.join(INSTALL_DIR, 'services');
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt');
 const MANIFEST_FILE = path.join(INSTALL_DIR, 'manifest.json');
 const LOGS_DIR = path.join(INSTALL_DIR, 'logs');
+const DIAGNOSTIC_LOG_FILE = path.join(LOGS_DIR, 'oneshell-diagnostic.log');
+const DIAGNOSTIC_MAX_SIZE = 5 * 1024 * 1024; // 5MB
+
+// --- Diagnostic logger ---
+function diagnosticLog(msg) {
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    console.log(msg);
+    try {
+        // Rotate if file exceeds 5MB
+        if (fs.existsSync(DIAGNOSTIC_LOG_FILE)) {
+            const stat = fs.statSync(DIAGNOSTIC_LOG_FILE);
+            if (stat.size > DIAGNOSTIC_MAX_SIZE) {
+                const oldFile = DIAGNOSTIC_LOG_FILE.replace('.log', '.old.log');
+                if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+                fs.renameSync(DIAGNOSTIC_LOG_FILE, oldFile);
+            }
+        }
+        fs.appendFileSync(DIAGNOSTIC_LOG_FILE, line);
+    } catch (e) {
+        // Silently ignore write errors
+    }
+}
 
 // Static files
 let staticPath = process.pkg
@@ -395,6 +417,9 @@ const RESTART_ORDER = ['OneShellMongoDB', 'OneShellNATS', 'OneShellPosBackend',
 // Track restart attempts to avoid restart storms
 const restartAttempts = {};
 const RESTART_COOLDOWN_MS = 120000; // 2 minutes between restart attempts per service
+const MAX_CONSECUTIVE_FAILURES = 10;
+const consecutiveFailures = {};
+const skippedLogTracker = {}; // Track already-logged skip reasons to avoid spam
 let watchdogEnabled = true;
 
 async function watchdogCheck() {
@@ -406,14 +431,32 @@ async function watchdogCheck() {
         return (order[a.type] || 1) - (order[b.type] || 1);
     });
 
+    let runningCount = 0;
+    let totalCount = 0;
+
     for (const svc of ordered) {
         if (svc.type === 'system') continue; // Don't watchdog the monitor itself
+        totalCount++;
 
         const status = await getServiceStatus(svc.serviceId);
         if (status.state === 'STOPPED') {
+            // Check if we already gave up on this service
+            if ((consecutiveFailures[svc.serviceId] || 0) >= MAX_CONSECUTIVE_FAILURES) {
+                if (!skippedLogTracker[svc.serviceId + ':givenup']) {
+                    diagnosticLog(`[Watchdog] GIVING UP on ${svc.name} after ${MAX_CONSECUTIVE_FAILURES} failed restarts. Manual intervention required.`);
+                    skippedLogTracker[svc.serviceId + ':givenup'] = true;
+                }
+                continue;
+            }
+
             const now = Date.now();
             const lastAttempt = restartAttempts[svc.serviceId] || 0;
-            if (now - lastAttempt < RESTART_COOLDOWN_MS) continue;
+            if (now - lastAttempt < RESTART_COOLDOWN_MS) {
+                if (!skippedLogTracker[svc.serviceId + ':cooldown']) {
+                    skippedLogTracker[svc.serviceId + ':cooldown'] = true;
+                }
+                continue;
+            }
 
             // Check if dependencies are running before restarting
             const deps = getDependencies(svc.serviceId);
@@ -423,18 +466,27 @@ async function watchdogCheck() {
                 if (!depStatus.running) { depsOk = false; break; }
             }
             if (!depsOk) {
-                console.log(`[Watchdog] Skipping ${svc.name} - dependencies not ready.`);
+                if (!skippedLogTracker[svc.serviceId + ':deps']) {
+                    diagnosticLog(`[Watchdog] Skipping ${svc.name} - dependencies not ready.`);
+                    skippedLogTracker[svc.serviceId + ':deps'] = true;
+                }
                 continue;
             }
 
-            console.log(`[Watchdog] Service ${svc.name} is ${status.state}, restarting...`);
+            diagnosticLog(`[Watchdog] Service ${svc.name} is ${status.state}, restarting... (attempt ${(consecutiveFailures[svc.serviceId] || 0) + 1}/${MAX_CONSECUTIVE_FAILURES})`);
             restartAttempts[svc.serviceId] = now;
 
             exec(`net start "${svc.serviceId}"`, (error, stdout, stderr) => {
                 if (error) {
-                    console.log(`[Watchdog] Failed to restart ${svc.name}: ${stderr || error.message}`);
+                    consecutiveFailures[svc.serviceId] = (consecutiveFailures[svc.serviceId] || 0) + 1;
+                    diagnosticLog(`[Watchdog] Failed to restart ${svc.name}: ${stderr || error.message} (failures: ${consecutiveFailures[svc.serviceId]})`);
                 } else {
-                    console.log(`[Watchdog] ${svc.name} restarted successfully.`);
+                    diagnosticLog(`[Watchdog] ${svc.name} restarted successfully.`);
+                    consecutiveFailures[svc.serviceId] = 0;
+                    // Clear skip trackers on success
+                    delete skippedLogTracker[svc.serviceId + ':givenup'];
+                    delete skippedLogTracker[svc.serviceId + ':cooldown'];
+                    delete skippedLogTracker[svc.serviceId + ':deps'];
                 }
             });
 
@@ -443,9 +495,19 @@ async function watchdogCheck() {
                 await new Promise(resolve => setTimeout(resolve, 5000));
             }
         } else if (status.state === 'RUNNING') {
+            runningCount++;
+            if (consecutiveFailures[svc.serviceId]) {
+                consecutiveFailures[svc.serviceId] = 0;
+                // Clear skip trackers when service recovers
+                delete skippedLogTracker[svc.serviceId + ':givenup'];
+                delete skippedLogTracker[svc.serviceId + ':cooldown'];
+                delete skippedLogTracker[svc.serviceId + ':deps'];
+            }
             delete restartAttempts[svc.serviceId];
         }
     }
+
+    diagnosticLog(`[Watchdog] Check complete: ${runningCount}/${totalCount} services OK`);
 }
 
 // Service dependency map (from WinSW <depend> tags)
@@ -595,9 +657,95 @@ app.get('/health', async (req, res) => {
     });
 });
 
+// --- Diagnostic log endpoint ---
+app.get('/api/diagnostic-log', (req, res) => {
+    if (!fs.existsSync(DIAGNOSTIC_LOG_FILE)) {
+        return res.json({ lines: [], file: 'oneshell-diagnostic.log' });
+    }
+    const content = fs.readFileSync(DIAGNOSTIC_LOG_FILE, 'utf8');
+    const allLines = content.split('\n').filter(l => l.length > 0);
+    const lines = allLines.slice(Math.max(0, allLines.length - 200));
+    res.json({ lines, file: 'oneshell-diagnostic.log' });
+});
+
+// --- Log summary endpoint ---
+app.get('/api/logs/summary', (req, res) => {
+    const summary = {};
+
+    SERVICES.forEach(svc => {
+        const dirName = LOG_DIR_MAP[svc.serviceId] || svc.serviceId.replace('OneShell', '').toLowerCase();
+        const logDir = path.join(LOGS_DIR, dirName);
+        const entry = { errLog: null, wrapperLog: null };
+
+        if (!fs.existsSync(logDir)) {
+            summary[svc.id] = entry;
+            return;
+        }
+
+        try {
+            const files = fs.readdirSync(logDir);
+
+            // Find latest .err.log
+            const errFiles = files.filter(f => f.endsWith('.err.log')).sort((a, b) => {
+                return fs.statSync(path.join(logDir, b)).mtimeMs - fs.statSync(path.join(logDir, a)).mtimeMs;
+            });
+            if (errFiles.length > 0) {
+                const errPath = path.join(logDir, errFiles[0]);
+                const stat = fs.statSync(errPath);
+                const content = fs.readFileSync(errPath, 'utf8');
+                const lines = content.split('\n');
+                entry.errLog = {
+                    file: errFiles[0],
+                    size: stat.size,
+                    lastLines: lines.slice(Math.max(0, lines.length - 20)).join('\n')
+                };
+            }
+
+            // Find latest .wrapper.log
+            const wrapperFiles = files.filter(f => f.endsWith('.wrapper.log') || f.endsWith('.out.log')).sort((a, b) => {
+                return fs.statSync(path.join(logDir, b)).mtimeMs - fs.statSync(path.join(logDir, a)).mtimeMs;
+            });
+            if (wrapperFiles.length > 0) {
+                const wrapPath = path.join(logDir, wrapperFiles[0]);
+                const stat = fs.statSync(wrapPath);
+                const content = fs.readFileSync(wrapPath, 'utf8');
+                const lines = content.split('\n');
+                entry.wrapperLog = {
+                    file: wrapperFiles[0],
+                    size: stat.size,
+                    lastLines: lines.slice(Math.max(0, lines.length - 10)).join('\n')
+                };
+            }
+        } catch (e) {
+            // Skip on read errors
+        }
+
+        summary[svc.id] = entry;
+    });
+
+    res.json({ success: true, summary });
+});
+
 // --- Start server ---
 app.listen(PORT, () => {
-    console.log(`OneShell Monitor running on http://localhost:${PORT}`);
+    const version = fs.existsSync(VERSION_FILE) ? fs.readFileSync(VERSION_FILE, 'utf8').trim() : 'unknown';
+    const banner = [
+        '========================================',
+        '  OneShell POS Monitor Started',
+        `  Time: ${new Date().toISOString()}`,
+        `  Version: ${version}`,
+        `  Install: ${INSTALL_DIR}`,
+        '========================================'
+    ].join('\n');
+    diagnosticLog(banner);
+
+    // Log initial status of each service
+    SERVICES.forEach(async (svc) => {
+        if (svc.type === 'system') return;
+        const status = await getServiceStatus(svc.serviceId);
+        diagnosticLog(`[Startup] ${svc.name}: ${status.state}`);
+    });
+
     if (process.platform === 'win32' && !process.env.ONESHELL_SERVICE_MODE) {
         exec(`start http://localhost:${PORT}`);
     }

@@ -98,9 +98,6 @@ Section "Install"
     ; Give MongoDB time to flush and close cleanly
     Sleep 5000
 
-    ; ======= Kill tray app =======
-    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
-
     ; ======= Kill lingering processes (targeted, not broad) =======
     DetailPrint "Cleaning up processes..."
 
@@ -131,7 +128,7 @@ Section "Install"
 
     ; ======= Verify critical processes are dead =======
     DetailPrint "Verifying processes stopped..."
-    nsExec::ExecToLog 'powershell -NoProfile -Command "$procs = @(\"mongod\",\"nats-server\",\"nginx\",\"OneShellMonitor\",\"OneShellTray\"); $running = Get-Process -Name $procs -ErrorAction SilentlyContinue; if ($running) { Write-Output \"WARNING: Still running: $($running.Name -join \", \")\"; Start-Sleep 5 } else { Write-Output \"All processes stopped.\" }"'
+    nsExec::ExecToLog 'powershell -NoProfile -Command "$procs = @(\"mongod\",\"nats-server\",\"nginx\",\"OneShellMonitor\"); $running = Get-Process -Name $procs -ErrorAction SilentlyContinue; if ($running) { Write-Output \"WARNING: Still running: $($running.Name -join \", \")\"; Start-Sleep 5 } else { Write-Output \"All processes stopped.\" }"'
 
     ; ======= Uninstall old services =======
     DetailPrint "Removing old service registrations..."
@@ -194,21 +191,6 @@ Section "Install"
     File "${BUNDLE_DIR}/monitor/OneShellMonitor.exe"
     SetOutPath "$INSTDIR\monitor\public"
     File /r "${BUNDLE_DIR}/monitor/public/*"
-
-    ; Tray App
-    DetailPrint "Installing Tray App..."
-    SetOutPath "$INSTDIR\tray"
-    File /nonfatal "${BUNDLE_DIR}/tray/OneShellTray.exe"
-    File /nonfatal "${BUNDLE_DIR}/tray/tray.js"
-    ; Create a launcher batch file (works whether pkg EXE exists or not)
-    FileOpen $0 "$INSTDIR\tray\launch-tray.bat" w
-    FileWrite $0 '@echo off$\r$\n'
-    FileWrite $0 'if exist "%~dp0OneShellTray.exe" ($\r$\n'
-    FileWrite $0 '    start "" "%~dp0OneShellTray.exe"$\r$\n'
-    FileWrite $0 ') else if exist "%~dp0tray.js" ($\r$\n'
-    FileWrite $0 '    start "" "%~dp0..\node\node.exe" "%~dp0tray.js"$\r$\n'
-    FileWrite $0 ')$\r$\n'
-    FileClose $0
 
     ; ======= Application artifacts =======
     DetailPrint "Installing POS applications..."
@@ -279,12 +261,22 @@ Section "Install"
     CreateDirectory "$INSTDIR\logs\monitor"
     ; Nginx needs these temp/log dirs (empty in distribution, NSIS File /r skips empty dirs)
     CreateDirectory "$INSTDIR\nginx\logs"
-    CreateDirectory "$INSTDIR\nginx\temp"
-    CreateDirectory "$INSTDIR\nginx\temp\client_body_temp"
-    CreateDirectory "$INSTDIR\nginx\temp\proxy_temp"
-    CreateDirectory "$INSTDIR\nginx\temp\fastcgi_temp"
-    CreateDirectory "$INSTDIR\nginx\temp\uwsgi_temp"
-    CreateDirectory "$INSTDIR\nginx\temp\scgi_temp"
+    ; Nginx temp dirs - must be under $INSTDIR\temp (matching nginx.conf paths)
+    CreateDirectory "$INSTDIR\temp"
+    CreateDirectory "$INSTDIR\temp\client_body_temp"
+    CreateDirectory "$INSTDIR\temp\proxy_temp"
+    CreateDirectory "$INSTDIR\temp\fastcgi_temp"
+    CreateDirectory "$INSTDIR\temp\uwsgi_temp"
+    CreateDirectory "$INSTDIR\temp\scgi_temp"
+
+    ; ======= Fix Python embedded path (._pth file controls sys.path, PYTHONPATH is ignored) =======
+    ; Python 3.11 embeddable uses python311._pth to control sys.path
+    ; Without this, 'from app import ...' fails with ModuleNotFoundError
+    IfFileExists "$INSTDIR\python\python311._pth" 0 +5
+    DetailPrint "Adding PosPythonBackend to Python path..."
+    FileOpen $0 "$INSTDIR\python\python311._pth" a
+    FileWrite $0 "$\r$\n../apps/PosPythonBackend$\r$\n"
+    FileClose $0
 
     ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
     DetailPrint "Installing Python dependencies (offline)..."
@@ -309,6 +301,20 @@ Section "Install"
     FileWrite $0 "${VERSION}"
     FileClose $0
 
+    ; ======= Install Visual C++ Redistributable (MongoDB 8.0 REQUIRES it) =======
+    ; MUST happen BEFORE service registration - SCM may auto-start delayed services
+    ; Exit code 0xC0000135 = STATUS_DLL_NOT_FOUND if VC++ is missing
+    IfFileExists "$INSTDIR\vc_redist.x64.exe" 0 vc_not_found
+    DetailPrint "Installing Visual C++ Redistributable (required by MongoDB 8.0)..."
+    ; Use ExecWait to guarantee DLLs are fully registered before proceeding
+    ExecWait '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+    DetailPrint "Visual C++ Redistributable exit code: $0"
+    Goto vc_done
+    vc_not_found:
+    DetailPrint "ERROR: vc_redist.x64.exe not found! MongoDB 8.0 will NOT start without it."
+    DetailPrint "Download from: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    vc_done:
+
     ; ======= Register Windows Services =======
     DetailPrint "Registering services..."
     SetOutPath "$INSTDIR\services"
@@ -319,13 +325,6 @@ Section "Install"
     nsExec::ExecToLog '"$INSTDIR\services\OneShellPosPythonBackendService.exe" install'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellFrontendService.exe" install'
     nsExec::ExecToLog '"$INSTDIR\services\OneShellMonitorService.exe" install'
-
-    ; ======= Install Visual C++ Redistributable (MongoDB 8.0 requires it) =======
-    IfFileExists "$INSTDIR\vc_redist.x64.exe" 0 +4
-    DetailPrint "Installing Visual C++ Redistributable (required by MongoDB)..."
-    nsExec::ExecToLog '"$INSTDIR\vc_redist.x64.exe" /install /quiet /norestart'
-    Goto +2
-    DetailPrint "WARNING: vc_redist.x64.exe not found! MongoDB may fail to start."
 
     ; ======= Start services (dependency order with verification) =======
 
@@ -395,17 +394,6 @@ Section "Install"
     CreateShortcut "$SMPROGRAMS\OneShell POS\Stop Services.lnk" "$INSTDIR\Stop-OneShell.bat" "" "$INSTDIR\icon.ico" 0
     CreateShortcut "$SMPROGRAMS\OneShell POS\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\icon.ico" 0
 
-    ; ======= Tray app auto-start on login =======
-    ; Create VBS launcher (no console window flash on login)
-    FileOpen $0 "$INSTDIR\tray\start-tray.vbs" w
-    FileWrite $0 'Set ws = CreateObject("WScript.Shell")$\r$\n'
-    FileWrite $0 'ws.Run Chr(34) & "$INSTDIR\tray\launch-tray.bat" & Chr(34), 0, False$\r$\n'
-    FileClose $0
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray" 'wscript.exe "$INSTDIR\tray\start-tray.vbs"'
-
-    ; Launch tray app now
-    DetailPrint "Launching tray app..."
-    Exec '"$INSTDIR\tray\launch-tray.bat"'
     ExecShell "open" "http://localhost:3005"
 
     DetailPrint "OneShell POS installed successfully!"
@@ -429,7 +417,6 @@ Section "Uninstall"
     Sleep 5000
 
     ; Kill lingering processes
-    nsExec::ExecToLog 'taskkill /F /IM OneShellTray.exe'
     nsExec::ExecToLog 'taskkill /F /IM OneShellMonitor.exe'
     nsExec::ExecToLog 'taskkill /F /IM nginx.exe'
     nsExec::ExecToLog 'taskkill /F /IM nats-server.exe'
@@ -468,7 +455,7 @@ Section "Uninstall"
 
     Sleep 2000
 
-    ; Remove tray from startup
+    ; Remove tray from startup (legacy cleanup)
     DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "OneShellTray"
 
     ; Remove files (keep data!)
@@ -485,6 +472,7 @@ Section "Uninstall"
     RMDir /r "$INSTDIR\config"
     RMDir /r "$INSTDIR\updater"
     RMDir /r "$INSTDIR\logs"
+    RMDir /r "$INSTDIR\temp"
     Delete "$INSTDIR\icon.ico"
     Delete "$INSTDIR\version.txt"
     Delete "$INSTDIR\*.bat"

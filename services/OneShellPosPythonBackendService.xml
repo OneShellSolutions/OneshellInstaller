@@ -15,6 +15,7 @@
     <sizeThreshold>10240</sizeThreshold>
     <pattern>yyyy-MM-dd</pattern>
     <autoRollAtTime>00:00:00</autoRollAtTime>
+    <keepFiles>5</keepFiles>
   </log>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>

@@ -5,9 +5,7 @@
   "bin": "index.js",
   "scripts": {
     "start": "node index.js",
-    "start:tray": "node tray.js",
     "package": "pkg -t node18-win-x64 -o dist/OneShellMonitor.exe .",
-    "package:tray": "pkg -t node18-win-x64 -o dist/OneShellTray.exe tray.js",
     "build": "bash build-installer.sh"
   },
   "dependencies": {

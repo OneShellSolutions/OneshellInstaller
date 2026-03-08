@@ -143,27 +143,16 @@ if not "%SIZE_CHECK%"=="OK" (
 call :log "Download complete (%INSTALLER_NAME%)."
 
 :: ============================================
-:: PRE-INSTALL: Kill tray app and wait for processes
+:: PRE-INSTALL: Prepare for update
 :: ============================================
-call :log "Stopping tray app..."
-taskkill /F /IM OneShellTray.exe >nul 2>&1
-
-:: Wait and verify tray is dead (poll, don't ping)
-call :log "Waiting for processes to exit..."
-for /L %%i in (1,1,10) do (
-    powershell -NoProfile -Command "Start-Sleep -Seconds 1"
-    tasklist /FI "IMAGENAME eq OneShellTray.exe" 2>nul | find /I "OneShellTray.exe" >nul 2>&1
-    if errorlevel 1 goto :tray_dead
-)
-call :log "WARNING: Tray app may still be running."
-:tray_dead
+call :log "Preparing for update..."
 
 :: ============================================
 :: INSTALL: Run silent installer
 :: ============================================
 call :log "Running silent installer..."
 
-:: The installer will: stop services -> replace files -> start services -> launch tray
+:: The installer will: stop services -> replace files -> start services
 "%DOWNLOAD_PATH%" /S
 
 :: Wait for installer to finish (poll for version file change)
