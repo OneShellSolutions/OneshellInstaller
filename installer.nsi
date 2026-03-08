@@ -269,14 +269,9 @@ Section "Install"
     CreateDirectory "$INSTDIR\temp\uwsgi_temp"
     CreateDirectory "$INSTDIR\temp\scgi_temp"
 
-    ; ======= Fix Python embedded path (._pth file controls sys.path, PYTHONPATH is ignored) =======
-    ; Python 3.11 embeddable uses python311._pth to control sys.path
-    ; Without this, 'from app import ...' fails with ModuleNotFoundError
-    IfFileExists "$INSTDIR\python\python311._pth" 0 +5
-    DetailPrint "Adding PosPythonBackend to Python path..."
-    FileOpen $0 "$INSTDIR\python\python311._pth" a
-    FileWrite $0 "$\r$\n../apps/PosPythonBackend$\r$\n"
-    FileClose $0
+    ; ======= Verify Python path file (._pth already configured by build script) =======
+    IfFileExists "$INSTDIR\python\python311._pth" 0 +2
+    DetailPrint "Python path file (python311._pth) present."
 
     ; ======= Install Python pip + deps (OFFLINE from bundled wheels) =======
     DetailPrint "Installing Python dependencies (offline)..."

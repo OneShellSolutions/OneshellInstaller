@@ -238,16 +238,16 @@ mkdir -p "${CACHE_DIR}/python-extract"
 unzip -qo "${CACHE_DIR}/python-${PYTHON_VERSION}.zip" -d "${CACHE_DIR}/python-extract"
 cp -r "${CACHE_DIR}/python-extract/"* "${BUNDLE_DIR}/python/"
 cp "${CACHE_DIR}/get-pip.py" "${BUNDLE_DIR}/python/"
-# Enable pip: uncomment "import site" in ._pth file
-PTH=$(ls "${BUNDLE_DIR}/python/"python*._pth 2>/dev/null | head -1)
-if [ -n "$PTH" ]; then
-    sed -i.bak 's/#import site/import site/' "$PTH" && rm -f "${PTH}.bak"
-    # Add PosPythonBackend to sys.path (Python embeddable ignores PYTHONPATH)
-    if ! grep -q "PosPythonBackend" "$PTH" 2>/dev/null; then
-        echo "" >> "$PTH"
-        echo "../apps/PosPythonBackend" >> "$PTH"
-        echo "       Added PosPythonBackend to $(basename $PTH)"
-    fi
+# Fix python311._pth - rewrite to include all needed paths
+PTH_FILE="${BUNDLE_DIR}/python/python311._pth"
+if [ -f "$PTH_FILE" ]; then
+    cat > "$PTH_FILE" << 'PTH_EOF'
+python311.zip
+.
+../apps/PosPythonBackend
+import site
+PTH_EOF
+    echo "       Fixed python311._pth"
 fi
 rm -rf "${CACHE_DIR}/python-extract"
 

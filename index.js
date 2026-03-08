@@ -8,10 +8,13 @@ const https = require('https');
 const app = express();
 const PORT = 3005;
 
+// Dev mode: mock Windows services on Mac/Linux for testing
+const DEV_MODE = process.platform !== 'win32' && !process.pkg;
+
 // Determine install directory (where the exe is running from, or parent of monitor dir)
 const INSTALL_DIR = process.pkg
     ? path.resolve(path.dirname(process.execPath), '..')
-    : path.resolve(__dirname, '..');
+    : path.resolve(__dirname, DEV_MODE ? '.' : '..');
 
 const SERVICES_DIR = path.join(INSTALL_DIR, 'services');
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt');
@@ -19,6 +22,17 @@ const MANIFEST_FILE = path.join(INSTALL_DIR, 'manifest.json');
 const LOGS_DIR = path.join(INSTALL_DIR, 'logs');
 const DIAGNOSTIC_LOG_FILE = path.join(LOGS_DIR, 'oneshell-diagnostic.log');
 const DIAGNOSTIC_MAX_SIZE = 5 * 1024 * 1024; // 5MB
+
+// --- Dev mode: mock service state ---
+const mockServiceState = {};
+if (DEV_MODE) {
+    ['OneShellMongoDB', 'OneShellNATS', 'OneShellPosBackend',
+     'OneShellPosNodeBackend', 'OneShellPosPythonBackend', 'OneShellFrontend', 'OneShellMonitor']
+        .forEach(s => mockServiceState[s] = 'RUNNING');
+    mockServiceState['OneShellMongoDB'] = 'STOPPED';
+    mockServiceState['OneShellPosNodeBackend'] = 'STOPPED';
+    mockServiceState['OneShellPosPythonBackend'] = 'STOPPED';
+}
 
 // --- Diagnostic logger ---
 function diagnosticLog(msg) {
@@ -121,6 +135,10 @@ const SERVICES = [
 
 // --- Helper: query Windows service status via sc ---
 function getServiceStatus(serviceId) {
+    if (DEV_MODE) {
+        const state = mockServiceState[serviceId] || 'NOT_INSTALLED';
+        return Promise.resolve({ state, running: state === 'RUNNING' });
+    }
     return new Promise((resolve) => {
         exec(`sc query "${serviceId}"`, (error, stdout) => {
             if (error) {
@@ -264,6 +282,12 @@ app.post('/api/services/:id/start', (req, res) => {
     const svc = SERVICES.find(s => s.id === req.params.id);
     if (!svc) return res.status(404).json({ success: false, message: 'Service not found' });
 
+    if (DEV_MODE) {
+        mockServiceState[svc.serviceId] = 'RUNNING';
+        diagnosticLog(`[Dev] Started ${svc.name}`);
+        return res.json({ success: true, message: `${svc.name} started.` });
+    }
+
     exec(`net start "${svc.serviceId}"`, (error, stdout, stderr) => {
         res.json({
             success: !error,
@@ -277,6 +301,12 @@ app.post('/api/services/:id/stop', (req, res) => {
     const svc = SERVICES.find(s => s.id === req.params.id);
     if (!svc) return res.status(404).json({ success: false, message: 'Service not found' });
 
+    if (DEV_MODE) {
+        mockServiceState[svc.serviceId] = 'STOPPED';
+        diagnosticLog(`[Dev] Stopped ${svc.name}`);
+        return res.json({ success: true, message: `${svc.name} stopped.` });
+    }
+
     exec(`net stop "${svc.serviceId}"`, (error, stdout, stderr) => {
         res.json({
             success: !error,
@@ -289,6 +319,13 @@ app.post('/api/services/:id/stop', (req, res) => {
 app.post('/api/services/:id/restart', (req, res) => {
     const svc = SERVICES.find(s => s.id === req.params.id);
     if (!svc) return res.status(404).json({ success: false, message: 'Service not found' });
+
+    if (DEV_MODE) {
+        mockServiceState[svc.serviceId] = 'STOPPED';
+        setTimeout(() => { mockServiceState[svc.serviceId] = 'RUNNING'; }, 1000);
+        diagnosticLog(`[Dev] Restarted ${svc.name}`);
+        return res.json({ success: true, message: `${svc.name} restarted.` });
+    }
 
     exec(`net stop "${svc.serviceId}"`, () => {
         setTimeout(() => {
@@ -306,6 +343,13 @@ app.post('/api/services/:id/restart', (req, res) => {
 app.post('/api/services/restart-all', (req, res) => {
     const order = ['OneShellMongoDB', 'OneShellNATS', 'OneShellPosBackend',
         'OneShellPosNodeBackend', 'OneShellPosPythonBackend', 'OneShellFrontend'];
+
+    if (DEV_MODE) {
+        order.forEach(s => mockServiceState[s] = 'STOPPED');
+        setTimeout(() => order.forEach(s => mockServiceState[s] = 'RUNNING'), 2000);
+        diagnosticLog('[Dev] Restart all services');
+        return res.json({ success: true, message: 'All services restarted.' });
+    }
 
     // Stop in reverse order
     const stopOrder = [...order].reverse();
@@ -476,6 +520,20 @@ async function watchdogCheck() {
             diagnosticLog(`[Watchdog] Service ${svc.name} is ${status.state}, restarting... (attempt ${(consecutiveFailures[svc.serviceId] || 0) + 1}/${MAX_CONSECUTIVE_FAILURES})`);
             restartAttempts[svc.serviceId] = now;
 
+            if (DEV_MODE) {
+                // Simulate 80% success rate in dev mode
+                if (Math.random() > 0.2) {
+                    mockServiceState[svc.serviceId] = 'RUNNING';
+                    diagnosticLog(`[Watchdog] ${svc.name} restarted successfully.`);
+                    consecutiveFailures[svc.serviceId] = 0;
+                    delete skippedLogTracker[svc.serviceId + ':givenup'];
+                    delete skippedLogTracker[svc.serviceId + ':cooldown'];
+                    delete skippedLogTracker[svc.serviceId + ':deps'];
+                } else {
+                    consecutiveFailures[svc.serviceId] = (consecutiveFailures[svc.serviceId] || 0) + 1;
+                    diagnosticLog(`[Watchdog] Failed to restart ${svc.name}: simulated failure (failures: ${consecutiveFailures[svc.serviceId]})`);
+                }
+            } else {
             exec(`net start "${svc.serviceId}"`, (error, stdout, stderr) => {
                 if (error) {
                     consecutiveFailures[svc.serviceId] = (consecutiveFailures[svc.serviceId] || 0) + 1;
@@ -489,6 +547,7 @@ async function watchdogCheck() {
                     delete skippedLogTracker[svc.serviceId + ':deps'];
                 }
             });
+            }
 
             // Wait 5 seconds after starting an infrastructure service before continuing
             if (svc.type === 'infrastructure') {
@@ -731,10 +790,11 @@ app.listen(PORT, () => {
     const version = fs.existsSync(VERSION_FILE) ? fs.readFileSync(VERSION_FILE, 'utf8').trim() : 'unknown';
     const banner = [
         '========================================',
-        '  OneShell POS Monitor Started',
+        `  OneShell POS Monitor Started${DEV_MODE ? ' (DEV MODE)' : ''}`,
         `  Time: ${new Date().toISOString()}`,
         `  Version: ${version}`,
         `  Install: ${INSTALL_DIR}`,
+        `  URL: http://localhost:${PORT}`,
         '========================================'
     ].join('\n');
     diagnosticLog(banner);
